@@ -21,6 +21,18 @@
       <AutoGen>True</AutoGen>
       <DependentUpon>ValTexts.resx</DependentUpon>
     </Compile>
+    <Compile Update="Resources\ViewModels\Page\PageEditViewModel.Designer.cs">
+      <DesignTime>True</DesignTime>
+      <AutoGen>True</AutoGen>
+      <DependentUpon>PageEditViewModel.resx</DependentUpon>
+    </Compile>
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Update="Resources\ViewModels\Page\PageEditViewModel.resx">
+      <Generator>PublicResXFileCodeGenerator</Generator>
+      <LastGenOutput>PageEditViewModel.Designer.cs</LastGenOutput>
+    </EmbeddedResource>
   </ItemGroup>
 
 </Project>
