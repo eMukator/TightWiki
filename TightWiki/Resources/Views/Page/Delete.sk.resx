@@ -120,10 +120,10 @@
   <data name="Are you sure you want to continue with this deletion?" xml:space="preserve">
     <value>Naozaj chcete pokračovať v tomto odstraňovaní?</value>
   </data>
-  <data name="Delete page \&quot;{0}\&quot;?" xml:space="preserve">
+  <data name="Delete page &quot;{0}&quot;?" xml:space="preserve">
     <value>Chcete odstrániť stránku \"{0}\"?</value>
   </data>
-  <data name="Deleting \&quot;{0}\&quot; will move the page, all {1} revisions and {2} file attachments to the deletion queue." xml:space="preserve">
+  <data name="Deleting &quot;{0}&quot; will move the page, all {1} revisions and {2} file attachments to the deletion queue." xml:space="preserve">
     <value>Odstránenie \"{0}\" presunie stránku, všetkých {1} revízií a {2} príloh súborov do frontu na odstraňovanie.</value>
   </data>
   <data name="No" xml:space="preserve">

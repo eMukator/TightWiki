@@ -120,11 +120,17 @@
   <data name="Cache" xml:space="preserve">
     <value>Mezipaměť</value>
   </data>
+  <data name="Environment" xml:space="preserve">
+    <value>Prostředí</value>
+  </data>
   <data name="Exceptions" xml:space="preserve">
     <value>Výjimky</value>
   </data>
   <data name="Flushing the memory cache will cause any cached items to be dropped and require database hits as pages are requested. Continue?" xml:space="preserve">
     <value>Vyprázdnění mezipaměti způsobí, že všechny položky uložené v mezipaměti budou zrušeny a budou vyžadovat databázové přístupy, když jsou požadovány stránky. Pokračovat?</value>
+  </data>
+  <data name="Framework Version" xml:space="preserve">
+    <value>Verze frameworku</value>
   </data>
   <data name="General" xml:space="preserve">
     <value>Obecné</value>
@@ -153,6 +159,12 @@
   <data name="Namespaces" xml:space="preserve">
     <value>Jmenné prostory</value>
   </data>
+  <data name="Operating System" xml:space="preserve">
+    <value>Operační systém</value>
+  </data>
+  <data name="OS Architecture" xml:space="preserve">
+    <value>Architektura OS</value>
+  </data>
   <data name="Page Attachment Revisions" xml:space="preserve">
     <value>Revize příloh stránky</value>
   </data>
@@ -170,6 +182,9 @@
   </data>
   <data name="Pages" xml:space="preserve">
     <value>Stránky</value>
+  </data>
+  <data name="Process Architecture" xml:space="preserve">
+    <value>Architektura procesů</value>
   </data>
   <data name="Profiles" xml:space="preserve">
     <value>Profily</value>

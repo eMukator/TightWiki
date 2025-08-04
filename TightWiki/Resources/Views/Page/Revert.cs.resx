@@ -129,7 +129,7 @@
   <data name="Reverting does not mean that changes will be lost however, the revert process will create a new revision with the reverted changes." xml:space="preserve">
     <value>Vrácení neznamená, že změny budou ztraceny, proces vrácení však vytvoří novou revizi s vrácenými změnami.</value>
   </data>
-  <data name="Reverting \&quot;{0}\&quot; from revision {1} to {2} will rollback {3} changes." xml:space="preserve">
+  <data name="Reverting &quot;{0}&quot; from revision {1} to {2} will rollback {3} changes." xml:space="preserve">
     <value>Vrácení \"{0}\" z revize {1} na {2} vrátí zpět {3} změn.</value>
   </data>
   <data name="Yes" xml:space="preserve">
