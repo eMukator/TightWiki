@@ -15,5 +15,6 @@ namespace TightWiki.Models.ViewModels.Page
         [Display(Name= "Body", ResourceType = typeof(Models.Resources.ViewModels.Page.PageEditViewModel))]
         public string? Body { get; set; } = string.Empty;
         public List<DataModels.Page> Templates { get; set; } = new();
+        public List<DataModels.FeatureTemplate> FeatureTemplates { get; set; } = new();
     }
 }
