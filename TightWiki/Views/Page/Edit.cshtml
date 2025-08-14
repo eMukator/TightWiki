@@ -11,20 +11,11 @@
 <link rel="stylesheet" href=@Url.Content("~/codemirror/theme/dark.css")>
 
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/addon/scroll/simplescrollbars.min.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabulator/6.3.1/css/tabulator.min.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.13/css/select2.min.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
-
-@if(sessionState.UserTheme.EditorTheme == "dark")
-{
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabulator/6.3.1/css/tabulator_midnight.min.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
-}
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/codemirror.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/addon/edit/matchbrackets.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <script src="@Url.Content("~/codemirror/mode/tightwiki/tightwiki.js")"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/addon/scroll/simplescrollbars.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/tabulator/6.3.1/js/tabulator.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.13/js/select2.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
 <style type="text/css">
     .CodeMirror {
@@ -122,7 +113,7 @@
         }
         $('#insertLinkModalLinkPage').select2({
             dropdownParent: $('#insertLinkModal'),
-            placeholder: '@(Localizer["Search..."])',
+            placeholder: '@Localizer["Search"]...',
             minimumInputLength: 0,
             ajax: {
                 url: '/Page/Autocomplete',
@@ -169,7 +160,7 @@
         if (linkMode === 'page') {
             const selected = $('#insertLinkModalLinkPage').select2('data')[0];
             if (!selected) {
-                alert('@(Localizer["Please select a wiki page."])');
+                alert('@Localizer["Select a wiki page."]');
                 isValid = false;
             } else {
 
@@ -184,10 +175,10 @@
         } else if (linkMode === 'url') {
             const url = document.getElementById('insertLinkModalLinkURL').value.trim();
             if (!url) {
-                alert('@(Localizer["Please enter a URL."])');
+                alert('@Localizer["Enter a URL."]');
                 isValid = false;
             } else if (!/^https?:\/\//i.test(url)) {
-                alert('@(Localizer["URL must start with http:// or https://"])');
+                alert('@Localizer["URL must start with"] http:// or https://');
                 isValid = false;
             } else {
 
@@ -201,7 +192,6 @@
             }
         } else {
             isValid = false;
-            alert('@(Localizer["Unknown link mode."])');
         }
 
         if (!isValid) return;
@@ -237,10 +227,10 @@
                 layout: "fitDataStretch",
                 columns: [
                         {
-                            title: "@(Localizer["Insert"])",
+                            title: "@Localizer["Insert"]",
                             headerSort: false,
                             hozAlign: "center",
-                            formatter: () => '<a class="btn btn-success btn-thin">@Localizer["Insert"]</a>',
+                            formatter: () => '<a class="btn btn-success btn-thin rounded-0">@Localizer["Insert"]</a>',
                             cellClick: (e, cell) => {
                                 const row = cell.getRow().getData();
                                 const value = row.templateText.replace(/\r\n/g, "\n");
@@ -265,7 +255,7 @@
                             }
                         },
                         {
-                            title: "@(Localizer["Name"])",
+                            title: "@Localizer["Name"]",
                             field: "name",
                             formatter: function (cell) {
                                 const data = cell.getRow().getData();
@@ -275,10 +265,10 @@
                                 return `<a href="@GlobalConfiguration.BasePath/${url}" target="_blank" rel="noopener noreferrer">${label}</a>`;
                             }
                         },
-                        { title: "@(Localizer["Type"])", field: "type" },
-                        { title: "@(Localizer["TemplateText"])", field: "templateText", visible: false },
-                        { title: "@(Localizer["HelpPageNavigation"])", field: "helpPageNavigation", visible: false },
-                        { title: "@(Localizer["Description"])", field: "description" }
+                        { title: "@Localizer["Type"]", field: "type" },
+                        { field: "templateText", visible: false },
+                        { field: "helpPageNavigation", visible: false },
+                        { title: "@Localizer["Description"]", field: "description" }
                     ],
                 });
 
@@ -295,9 +285,9 @@
                 const searchTerm = this.value;
                 featureInsertModalTable.setFilter([
                     [
-                        {field: "name", type: "like", value: searchTerm},
-                        {field: "type", type: "like", value: searchTerm},
-                        {field: "description", type: "like", value: searchTerm},
+                        { field: "name", type: "like", value: searchTerm},
+                        { field: "type", type: "like", value: searchTerm},
+                        { field: "description", type: "like", value: searchTerm},
                     ]
                 ]);
             });
@@ -434,17 +424,17 @@
                 @Html.HiddenFor(x => x.Id)
 
                 <div class="form-group">
-                    <button type="submit" class="btn btn-primary rounded-0">@Localizer["Save"]</button>
+                    <button type="submit" class="btn btn-primary">@Localizer["Save"]</button>
                     @if (sessionState.CanView == true)
                     {
                         if (Model?.Id > 0)
                         {
-                            <a href="@GlobalConfiguration.BasePath/@sessionState.PageNavigation" target="_blank" rel="noopener" class="btn btn-success rounded-0" role="button">@Localizer["View"]</a>
-                            <a href="@GlobalConfiguration.BasePath/@sessionState.PageNavigation/Export" target="_blank" rel="noopener" class="btn btn-secondary rounded-0" role="button">@Localizer["Export"]</a>
+                            <a href="@GlobalConfiguration.BasePath/@sessionState.PageNavigation" target="_blank" rel="noopener" class="btn btn-success" role="button">@Localizer["View"]</a>
+                            <a href="@GlobalConfiguration.BasePath/@sessionState.PageNavigation/Export" target="_blank" rel="noopener" class="btn btn-secondary" role="button">@Localizer["Export"]</a>
                         }
                         else
                         {
-                            <button type="button" class="btn btn-link rounded-0" data-bs-toggle="modal" data-bs-target="#templatesModal">@Localizer["Choose template"]</button>
+                            <button type="button" class="btn btn-link" data-bs-toggle="modal" data-bs-target="#templatesModal">@Localizer["Choose template"]</button>
                         }
                     }
                     <span class="badge text-bg-danger invisible">@Localizer["unauthorized"]</span>
@@ -530,11 +520,11 @@
                 <br />
 
                 <div class="form-group">
-                    <button type="submit" class="btn btn-primary rounded-0">@Localizer["Save"]</button>
+                    <button type="submit" class="btn btn-primary">@Localizer["Save"]</button>
                     @if (Model?.Id > 0 && sessionState.CanView == true)
                     {
-                        <a href="@GlobalConfiguration.BasePath/@sessionState.PageNavigation" target="_blank" rel="noopener" class="btn btn-success rounded-0" role="button">@Localizer["View"]</a>
-                        <a href="@GlobalConfiguration.BasePath/@sessionState.PageNavigation/Export" target="_blank" rel="noopener" class="btn btn-secondary rounded-0" role="button">@Localizer["Export"]</a>
+                        <a href="@GlobalConfiguration.BasePath/@sessionState.PageNavigation" target="_blank" rel="noopener" class="btn btn-success" role="button">@Localizer["View"]</a>
+                        <a href="@GlobalConfiguration.BasePath/@sessionState.PageNavigation/Export" target="_blank" rel="noopener" class="btn btn-secondary" role="button">@Localizer["Export"]</a>
                     }
                     <span class="badge text-bg-danger invisible">@Localizer["unauthorized"]</span>
                 </div>
