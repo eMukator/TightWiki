@@ -237,19 +237,10 @@
   <data name="Unknown link mode." xml:space="preserve">
     <value>Neznámy druh odkazu.</value>
   </data>
-  <data name="Name" xml:space="preserve">
-    <value>Meno</value>
-  </data>
-  <data name="Type" xml:space="preserve">
-    <value>Typ</value>
-  </data>
   <data name="TemplateText" xml:space="preserve">
     <value>Text šablóny</value>
   </data>
   <data name="HelpPageNavigation" xml:space="preserve">
     <value>Navigácia na stránke pomocníka</value>
-  </data>
-  <data name="Description" xml:space="preserve">
-    <value>Popis</value>
   </data>
 </root>
