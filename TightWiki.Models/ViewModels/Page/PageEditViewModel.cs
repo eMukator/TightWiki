@@ -12,6 +12,7 @@ namespace TightWiki.Models.ViewModels.Page
         public string Navigation { get; set; } = string.Empty;
         [Display(Name= "Description", ResourceType = typeof(Models.Resources.ViewModels.Page.PageEditViewModel))]
         public string? Description { get; set; } = string.Empty;
+        public string? ChangeSummary { get; set; } = string.Empty;
         [Display(Name= "Body", ResourceType = typeof(Models.Resources.ViewModels.Page.PageEditViewModel))]
         public string? Body { get; set; } = string.Empty;
         public List<DataModels.Page> Templates { get; set; } = new();

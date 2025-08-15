@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Authorization;
+﻿using DiffPlex.DiffBuilder;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Localization;
 using Microsoft.AspNetCore.Mvc;
@@ -28,7 +29,8 @@ namespace TightWiki.Controllers
         ITightEngine tightEngine,
         SignInManager<IdentityUser> signInManager,
         UserManager<IdentityUser> userManager,
-        IStringLocalizer<PageController> localizer)
+        IStringLocalizer<PageController> localizer,
+        ISideBySideDiffBuilder diffBuilder)
         : WikiControllerBase<PageController>(signInManager, userManager, localizer)
     {
         [AllowAnonymous]
@@ -49,7 +51,6 @@ namespace TightWiki.Controllers
         {
             return Json(new { now = DateTime.UtcNow });
         }
-
 
         #region Display.
 
@@ -435,6 +436,41 @@ namespace TightWiki.Controllers
 
         #endregion
 
+        #region Compare.
+
+        [Authorize]
+        [HttpGet("{givenCanonical}/Compare/{pageRevision:int}")]
+        public ActionResult Compare(string givenCanonical, int pageRevision)
+        {
+            SessionState.RequireViewPermission();
+
+            var pageNavigation = NamespaceNavigation.CleanAndValidate(givenCanonical);
+
+            var thisRev = PageRepository.GetPageRevisionByNavigation(pageNavigation, pageRevision);
+            var prevRev = PageRepository.GetPageRevisionByNavigation(pageNavigation, pageRevision - 1);
+
+            if (thisRev != null)
+            {
+                SessionState.SetPageId(thisRev.Id, pageRevision);
+            }
+
+            var model = new PageCompareViewModel()
+            {
+                MostCurrentRevision = thisRev?.MostCurrentRevision,
+                ModifiedByUserName = thisRev?.ModifiedByUserName ?? string.Empty,
+                ThisRevision = thisRev?.Revision,
+                PreviousRevision = prevRev?.Revision,
+                DiffModel = diffBuilder.BuildDiffModel(prevRev?.Body ?? string.Empty, thisRev?.Body ?? string.Empty),
+                ModifiedDate = SessionState.LocalizeDateTime(thisRev?.ModifiedDate ?? DateTime.MinValue),
+                ChangeSummary = thisRev?.ChangeSummary ?? string.Empty,
+                ChangeAnalysis = Differentiator.GetComparisonSummary(thisRev?.Body ?? "", prevRev?.Body ?? "")
+            };
+
+            return View(model);
+        }
+
+        #endregion
+
         #region Revisions.
 
         [Authorize]
@@ -466,7 +502,7 @@ namespace TightWiki.Controllers
             {
                 var thisRev = PageRepository.GetPageRevisionByNavigation(p.Navigation, p.Revision);
                 var prevRev = PageRepository.GetPageRevisionByNavigation(p.Navigation, p.Revision - 1);
-                p.ChangeSummary = Differentiator.GetComparisonSummary(thisRev?.Body ?? "", prevRev?.Body ?? "");
+                p.ChangeAnalysis = Differentiator.GetComparisonSummary(thisRev?.Body ?? "", prevRev?.Body ?? "");
             }
 
             if (model.Revisions != null && model.Revisions.Count > 0)
@@ -669,6 +705,14 @@ namespace TightWiki.Controllers
 
             model.FeatureTemplates = PageRepository.GetAllFeatureTemplates();
 
+            if (GlobalConfiguration.ShowChangeSummaryWhenEditing
+                && GlobalConfiguration.RequireChangeSummaryWhenEditing
+                && string.IsNullOrEmpty(model.ChangeSummary))
+            {
+                ModelState.AddModelError("ChangeSummary", Localize("A change summary is required for page edits."));
+                return View(model);
+            }
+
             if (model.Id == 0) //Saving a new page.
             {
                 var page = new Page()
@@ -679,6 +723,7 @@ namespace TightWiki.Controllers
                     ModifiedByUserId = SessionState.Profile.UserId,
                     Body = model.Body ?? "",
                     Name = model.Name,
+                    ChangeSummary = model.ChangeSummary ?? string.Empty,
                     Navigation = NamespaceNavigation.CleanAndValidate(model.Name),
                     Description = model.Description ?? ""
                 };
@@ -723,6 +768,7 @@ namespace TightWiki.Controllers
                 page.ModifiedByUserId = SessionState.Profile.EnsureNotNull().UserId;
                 page.Body = model.Body ?? "";
                 page.Name = model.Name;
+                page.ChangeSummary = model.ChangeSummary ?? string.Empty;
                 page.Navigation = NamespaceNavigation.CleanAndValidate(model.Name);
                 page.Description = model.Description ?? "";
 
