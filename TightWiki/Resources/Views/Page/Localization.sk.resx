@@ -1,64 +1,6 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <root>
-  <!-- 
-    Microsoft ResX Schema 
-    
-    Version 2.0
-    
-    The primary goals of this format is to allow a simple XML format 
-    that is mostly human readable. The generation and parsing of the 
-    various data types are done through the TypeConverter classes 
-    associated with the data types.
-    
-    Example:
-    
-    ... ado.net/XML headers & schema ...
-    <resheader name="resmimetype">text/microsoft-resx</resheader>
-    <resheader name="version">2.0</resheader>
-    <resheader name="reader">System.Resources.ResXResourceReader, System.Windows.Forms, ...</resheader>
-    <resheader name="writer">System.Resources.ResXResourceWriter, System.Windows.Forms, ...</resheader>
-    <data name="Name1"><value>this is my long string</value><comment>this is a comment</comment></data>
-    <data name="Color1" type="System.Drawing.Color, System.Drawing">Blue</data>
-    <data name="Bitmap1" mimetype="application/x-microsoft.net.object.binary.base64">
-        <value>[base64 mime encoded serialized .NET Framework object]</value>
-    </data>
-    <data name="Icon1" type="System.Drawing.Icon, System.Drawing" mimetype="application/x-microsoft.net.object.bytearray.base64">
-        <value>[base64 mime encoded string representing a byte array form of the .NET Framework object]</value>
-        <comment>This is a comment</comment>
-    </data>
-                
-    There are any number of "resheader" rows that contain simple 
-    name/value pairs.
-    
-    Each data row contains a name, and value. The row also contains a 
-    type or mimetype. Type corresponds to a .NET class that support 
-    text/value conversion through the TypeConverter architecture. 
-    Classes that don't support this are serialized and stored with the 
-    mimetype set.
-    
-    The mimetype is used for serialized objects, and tells the 
-    ResXResourceReader how to depersist the object. This is currently not 
-    extensible. For a given mimetype the value must be set accordingly:
-    
-    Note - application/x-microsoft.net.object.binary.base64 is the format 
-    that the ResXResourceWriter will generate, however the reader can 
-    read any of the formats listed below.
-    
-    mimetype: application/x-microsoft.net.object.binary.base64
-    value   : The object must be serialized with 
-            : System.Runtime.Serialization.Formatters.Binary.BinaryFormatter
-            : and then encoded with base64 encoding.
-    
-    mimetype: application/x-microsoft.net.object.soap.base64
-    value   : The object must be serialized with 
-            : System.Runtime.Serialization.Formatters.Soap.SoapFormatter
-            : and then encoded with base64 encoding.
-
-    mimetype: application/x-microsoft.net.object.bytearray.base64
-    value   : The object must be serialized into a byte array 
-            : using a System.ComponentModel.TypeConverter
-            : and then encoded with base64 encoding.
-    -->
+  
   <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
     <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
     <xsd:element name="root" msdata:IsDataSet="true">
@@ -118,15 +60,141 @@
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
   <data name="Czech" xml:space="preserve">
-    <value>Čeština</value>
+    <value>čeština</value>
   </data>
   <data name="English" xml:space="preserve">
-    <value>Angličtina</value>
+    <value>angličtina</value>
   </data>
   <data name="Languages" xml:space="preserve">
-    <value>Jazyky</value>
+    <value>jazyky</value>
   </data>
   <data name="Slovak" xml:space="preserve">
-    <value>Slovenčina</value>
+    <value>slovenčina</value>
+  </data>
+  <data name="Arabic" xml:space="preserve">
+    <value>arabčina</value>
+  </data>
+  <data name="Bengali" xml:space="preserve">
+    <value>bengálčina</value>
+  </data>
+  <data name="German" xml:space="preserve">
+    <value>nemčina</value>
+  </data>
+  <data name="Spanish" xml:space="preserve">
+    <value>španielčina</value>
+  </data>
+  <data name="Hindi" xml:space="preserve">
+    <value>hindčina</value>
+  </data>
+  <data name="French" xml:space="preserve">
+    <value>francúzština</value>
+  </data>
+  <data name="Italian" xml:space="preserve">
+    <value>taliančina</value>
+  </data>
+  <data name="Japanese" xml:space="preserve">
+    <value>japončina</value>
+  </data>
+  <data name="Korean" xml:space="preserve">
+    <value>kórejčina</value>
+  </data>
+  <data name="Portuguese" xml:space="preserve">
+    <value>portugalčina</value>
+  </data>
+  <data name="Ukrainian" xml:space="preserve">
+    <value>ukrajinčina</value>
+  </data>
+  <data name="Persian" xml:space="preserve">
+    <value>perzština</value>
+  </data>
+  <data name="Vietnamese" xml:space="preserve">
+    <value>vietnamský</value>
+  </data>
+  <data name="Polish" xml:space="preserve">
+    <value>poľština</value>
+  </data>
+  <data name="Dutch" xml:space="preserve">
+    <value>holandčina</value>
+  </data>
+  <data name="Indonesian" xml:space="preserve">
+    <value>indonézština</value>
+  </data>
+  <data name="Turkish" xml:space="preserve">
+    <value>turečtina</value>
+  </data>
+  <data name="Chinese traditional" xml:space="preserve">
+    <value>tradičná čínština</value>
+  </data>
+  <data name="Chinese simplified" xml:space="preserve">
+    <value>zjednodušená čínština</value>
+  </data>
+  <data name="Russian" xml:space="preserve">
+    <value>ruština</value>
+  </data>
+  <data name="Greek" xml:space="preserve">
+    <value>Grécky</value>
+  </data>
+  <data name="Azerbaijani" xml:space="preserve">
+    <value>Azerbajdžanský</value>
+  </data>
+  <data name="Belarusian" xml:space="preserve">
+    <value>Belaruský</value>
+  </data>
+  <data name="Bulgarian" xml:space="preserve">
+    <value>Bulharský</value>
+  </data>
+  <data name="Danish" xml:space="preserve">
+    <value>Dánsky</value>
+  </data>
+  <data name="Estonian" xml:space="preserve">
+    <value>Estónsky</value>
+  </data>
+  <data name="Finnish" xml:space="preserve">
+    <value>Fínsky</value>
+  </data>
+  <data name="Hebrew" xml:space="preserve">
+    <value>Hebrejský</value>
+  </data>
+  <data name="Croatian" xml:space="preserve">
+    <value>Kroátsky</value>
+  </data>
+  <data name="Hungarian" xml:space="preserve">
+    <value>Maďarský</value>
+  </data>
+  <data name="Icelnadic" xml:space="preserve">
+    <value>Islanský</value>
+  </data>
+  <data name="Georgian" xml:space="preserve">
+    <value>Gruzínsky</value>
+  </data>
+  <data name="Kazakh" xml:space="preserve">
+    <value>Kazašský</value>
+  </data>
+  <data name="Lithuianian" xml:space="preserve">
+    <value>Litevský</value>
+  </data>
+  <data name="Latvian" xml:space="preserve">
+    <value>Lotyšský</value>
+  </data>
+  <data name="Malay" xml:space="preserve">
+    <value>Malajský</value>
+  </data>
+  <data name="Norwegian" xml:space="preserve">
+    <value>Nórsky</value>
+  </data>
+  <data name="Romanian" xml:space="preserve">
+    <value>Rumunský</value>
+  </data>
+  <data name="Slovenian" xml:space="preserve">
+    <value>Slovinský</value>
+  </data>
+  <data name="Serbian" xml:space="preserve">
+    <value>Srbský</value>
+  </data>
+  <data name="Swedish" xml:space="preserve">
+    <value>Švédsky</value>
+  </data>
+  <data name="Thai" xml:space="preserve">
+    <value>Thajský</value>
   </data>
 </root>
