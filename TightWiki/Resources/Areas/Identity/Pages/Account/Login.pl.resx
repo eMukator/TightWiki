@@ -77,4 +77,46 @@
   <data name="Resend email confirmation" xml:space="preserve">
     <value>Wyślij ponownie potwierdzenie email</value>
   </data>
+  <data name="- or -" xml:space="preserve">
+    <value>- lub -</value>
+  </data>
+  <data name="Sign in with {0}" xml:space="preserve">
+    <value>Zaloguj się z {0}</value>
+  </data>
+  <data name="Username" xml:space="preserve">
+    <value>Nazwa użytkownika</value>
+  </data>
+  <data name="Failed to create the stub account for the LDAP credential." xml:space="preserve">
+    <value>Nie udało się utworzyć konta stub dla poświadczeń LDAP.</value>
+  </data>
+  <data name="Failed to locate the user account for the LDAP credential." xml:space="preserve">
+    <value>Nie udało się zlokalizować konta użytkownika dla poświadczeń LDAP.</value>
+  </data>
+  <data name="User created a new account with LDAP." xml:space="preserve">
+    <value>Użytkownik utworzył nowe konto za pomocą LDAP.</value>
+  </data>
+  <data name="Failed to create stub account for the LDAP credential: {0}." xml:space="preserve">
+    <value>Nie udało się utworzyć konta zastępczego dla poświadczenia LDAP: {0}.</value>
+  </data>
+  <data name="Invalid login attempt." xml:space="preserve">
+    <value>Nieprawidłowa próba logowania.</value>
+  </data>
+  <data name="Failed to add login info for LDAP stub account: {0}." xml:space="preserve">
+    <value>Nie udało się dodać informacji logowania dla konta zastępczego LDAP: {0}.</value>
+  </data>
+  <data name="Please enter both username and password." xml:space="preserve">
+    <value>Proszę wpisać zarówno nazwę użytkownika, jak i hasło.</value>
+  </data>
+  <data name="Request failed:" xml:space="preserve">
+    <value>Żądanie nie powiodło się:</value>
+  </data>
+  <data name="Bind succeeded." xml:space="preserve">
+    <value>Powiązanie powiodło się.</value>
+  </data>
+  <data name="Bind failed." xml:space="preserve">
+    <value>Powiązanie nie powiodło się.</value>
+  </data>
+  <data name="Unexpected error:" xml:space="preserve">
+    <value>Nieoczekiwany błąd:</value>
+  </data>
 </root>

@@ -77,4 +77,46 @@
   <data name="Resend email confirmation" xml:space="preserve">
     <value>メール確認を再送</value>
   </data>
+  <data name="- or -" xml:space="preserve">
+    <value>- または -</value>
+  </data>
+  <data name="Sign in with {0}" xml:space="preserve">
+    <value>{0}でサインイン</value>
+  </data>
+  <data name="Username" xml:space="preserve">
+    <value>ユーザー名</value>
+  </data>
+  <data name="Failed to create the stub account for the LDAP credential." xml:space="preserve">
+    <value>LDAP認証情報のためのスタブアカウントの作成に失敗しました。</value>
+  </data>
+  <data name="Failed to locate the user account for the LDAP credential." xml:space="preserve">
+    <value>LDAP認証情報のためのユーザーアカウントの位置を特定できませんでした。</value>
+  </data>
+  <data name="User created a new account with LDAP." xml:space="preserve">
+    <value>ユーザーがLDAPで新しいアカウントを作成しました。</value>
+  </data>
+  <data name="Failed to create stub account for the LDAP credential: {0}." xml:space="preserve">
+    <value>LDAP認証情報のためのスタブアカウントの作成に失敗しました: {0}。</value>
+  </data>
+  <data name="Invalid login attempt." xml:space="preserve">
+    <value>無効なログイン試行。</value>
+  </data>
+  <data name="Failed to add login info for LDAP stub account: {0}." xml:space="preserve">
+    <value>LDAPスタブアカウントのログイン情報の追加に失敗しました: {0}。</value>
+  </data>
+  <data name="Please enter both username and password." xml:space="preserve">
+    <value>ユーザー名とパスワードの両方を入力してください。</value>
+  </data>
+  <data name="Request failed:" xml:space="preserve">
+    <value>リクエストが失敗しました:</value>
+  </data>
+  <data name="Bind succeeded." xml:space="preserve">
+    <value>バインドに成功しました。</value>
+  </data>
+  <data name="Bind failed." xml:space="preserve">
+    <value>バインドに失敗しました。</value>
+  </data>
+  <data name="Unexpected error:" xml:space="preserve">
+    <value>予期しないエラー:</value>
+  </data>
 </root>

@@ -77,4 +77,46 @@
   <data name="Resend email confirmation" xml:space="preserve">
     <value>이메일 확인 재전송</value>
   </data>
+  <data name="- or -" xml:space="preserve">
+    <value>- 또는 -</value>
+  </data>
+  <data name="Sign in with {0}" xml:space="preserve">
+    <value>{0}로 로그인</value>
+  </data>
+  <data name="Username" xml:space="preserve">
+    <value>사용자 이름</value>
+  </data>
+  <data name="Failed to create the stub account for the LDAP credential." xml:space="preserve">
+    <value>LDAP 자격 증명을 위한 스텁 계정을 생성하지 못했습니다.</value>
+  </data>
+  <data name="Failed to locate the user account for the LDAP credential." xml:space="preserve">
+    <value>LDAP 자격 증명을 위한 사용자 계정을 찾지 못했습니다.</value>
+  </data>
+  <data name="User created a new account with LDAP." xml:space="preserve">
+    <value>사용자가 LDAP로 새 계정을 생성했습니다.</value>
+  </data>
+  <data name="Failed to create stub account for the LDAP credential: {0}." xml:space="preserve">
+    <value>LDAP 인증서 {0}에 대한 스텁 계정 생성을 실패했습니다.</value>
+  </data>
+  <data name="Invalid login attempt." xml:space="preserve">
+    <value>잘못된 로그인 시도입니다.</value>
+  </data>
+  <data name="Failed to add login info for LDAP stub account: {0}." xml:space="preserve">
+    <value>LDAP 스텁 계정에 대한 로그인 정보를 추가하지 못했습니다: {0}.</value>
+  </data>
+  <data name="Please enter both username and password." xml:space="preserve">
+    <value>사용자 이름과 비밀번호를 모두 입력하십시오.</value>
+  </data>
+  <data name="Request failed:" xml:space="preserve">
+    <value>요청 실패:</value>
+  </data>
+  <data name="Bind succeeded." xml:space="preserve">
+    <value>바인딩 성공.</value>
+  </data>
+  <data name="Bind failed." xml:space="preserve">
+    <value>바인딩 실패.</value>
+  </data>
+  <data name="Unexpected error:" xml:space="preserve">
+    <value>예기치 않은 오류:</value>
+  </data>
 </root>

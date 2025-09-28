@@ -77,4 +77,46 @@
   <data name="Resend email confirmation" xml:space="preserve">
     <value>Reinvia la conferma dell'email</value>
   </data>
+  <data name="- or -" xml:space="preserve">
+    <value>- o -</value>
+  </data>
+  <data name="Sign in with {0}" xml:space="preserve">
+    <value>Accedi con {0}</value>
+  </data>
+  <data name="Username" xml:space="preserve">
+    <value>Nome utente</value>
+  </data>
+  <data name="Failed to create the stub account for the LDAP credential." xml:space="preserve">
+    <value>Impossibile creare l'account stub per le credenziali LDAP.</value>
+  </data>
+  <data name="Failed to locate the user account for the LDAP credential." xml:space="preserve">
+    <value>Impossibile trovare l'account utente per le credenziali LDAP.</value>
+  </data>
+  <data name="User created a new account with LDAP." xml:space="preserve">
+    <value>L'utente ha creato un nuovo account con LDAP.</value>
+  </data>
+  <data name="Failed to create stub account for the LDAP credential: {0}." xml:space="preserve">
+    <value>Impossibile creare un account stub per le credenziali LDAP: {0}.</value>
+  </data>
+  <data name="Invalid login attempt." xml:space="preserve">
+    <value>Tentativo di accesso non valido.</value>
+  </data>
+  <data name="Failed to add login info for LDAP stub account: {0}." xml:space="preserve">
+    <value>Impossibile aggiungere informazioni di accesso per l'account stub LDAP: {0}.</value>
+  </data>
+  <data name="Please enter both username and password." xml:space="preserve">
+    <value>Per favore, inserisci sia il nome utente che la password.</value>
+  </data>
+  <data name="Request failed:" xml:space="preserve">
+    <value>Richiesta fallita:</value>
+  </data>
+  <data name="Bind succeeded." xml:space="preserve">
+    <value>Il bind ha avuto successo.</value>
+  </data>
+  <data name="Bind failed." xml:space="preserve">
+    <value>Il bind è fallito.</value>
+  </data>
+  <data name="Unexpected error:" xml:space="preserve">
+    <value>Errore inaspettato:</value>
+  </data>
 </root>

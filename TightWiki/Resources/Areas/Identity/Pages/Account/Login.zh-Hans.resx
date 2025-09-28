@@ -77,4 +77,46 @@
   <data name="Resend email confirmation" xml:space="preserve">
     <value>重新发送电子邮件确认</value>
   </data>
+  <data name="- or -" xml:space="preserve">
+    <value>- 或者 -</value>
+  </data>
+  <data name="Sign in with {0}" xml:space="preserve">
+    <value>使用 {0} 登录</value>
+  </data>
+  <data name="Username" xml:space="preserve">
+    <value>用户名</value>
+  </data>
+  <data name="Failed to create the stub account for the LDAP credential." xml:space="preserve">
+    <value>无法为LDAP凭据创建账户存根。</value>
+  </data>
+  <data name="Failed to locate the user account for the LDAP credential." xml:space="preserve">
+    <value>无法找到LDAP凭据的用户账户。</value>
+  </data>
+  <data name="User created a new account with LDAP." xml:space="preserve">
+    <value>用户使用LDAP创建了一个新账户。</value>
+  </data>
+  <data name="Failed to create stub account for the LDAP credential: {0}." xml:space="preserve">
+    <value>无法为LDAP凭证创建存根账户: {0}。</value>
+  </data>
+  <data name="Invalid login attempt." xml:space="preserve">
+    <value>登录尝试无效。</value>
+  </data>
+  <data name="Failed to add login info for LDAP stub account: {0}." xml:space="preserve">
+    <value>无法为LDAP存根账户添加登录信息: {0}。</value>
+  </data>
+  <data name="Please enter both username and password." xml:space="preserve">
+    <value>请输入用户名和密码。</value>
+  </data>
+  <data name="Request failed:" xml:space="preserve">
+    <value>请求失败：</value>
+  </data>
+  <data name="Bind succeeded." xml:space="preserve">
+    <value>绑定成功。</value>
+  </data>
+  <data name="Bind failed." xml:space="preserve">
+    <value>绑定失败。</value>
+  </data>
+  <data name="Unexpected error:" xml:space="preserve">
+    <value>意外错误：</value>
+  </data>
 </root>

@@ -77,4 +77,46 @@
   <data name="Resend email confirmation" xml:space="preserve">
     <value>Znova odoslať potvrdenie e-mailom</value>
   </data>
+  <data name="- or -" xml:space="preserve">
+    <value>- alebo -</value>
+  </data>
+  <data name="Sign in with {0}" xml:space="preserve">
+    <value>Prihláste sa pomocou {0}</value>
+  </data>
+  <data name="Username" xml:space="preserve">
+    <value>Používateľské meno</value>
+  </data>
+  <data name="Failed to create the stub account for the LDAP credential." xml:space="preserve">
+    <value>Nepodarilo sa vytvoriť dočasný účet pre LDAP poverenie.</value>
+  </data>
+  <data name="Failed to locate the user account for the LDAP credential." xml:space="preserve">
+    <value>Nepodarilo sa nájsť používateľský účet pre LDAP poverenie.</value>
+  </data>
+  <data name="User created a new account with LDAP." xml:space="preserve">
+    <value>Používateľ vytvoril nový účet s LDAP.</value>
+  </data>
+  <data name="Failed to create stub account for the LDAP credential: {0}." xml:space="preserve">
+    <value>Vytvorenie dočasného účtu pre LDAP poverenie zlyhalo: {0}.</value>
+  </data>
+  <data name="Invalid login attempt." xml:space="preserve">
+    <value>Neplatný pokus o prihlásenie.</value>
+  </data>
+  <data name="Failed to add login info for LDAP stub account: {0}." xml:space="preserve">
+    <value>Pridanie prihlasovacích informácií pre dočasný účet LDAP zlyhalo: {0}.</value>
+  </data>
+  <data name="Please enter both username and password." xml:space="preserve">
+    <value>Prosím, zadajte meno používateľa a heslo.</value>
+  </data>
+  <data name="Request failed:" xml:space="preserve">
+    <value>Žiadosť zlyhala:</value>
+  </data>
+  <data name="Bind succeeded." xml:space="preserve">
+    <value>Pripojenie bolo úspešné.</value>
+  </data>
+  <data name="Bind failed." xml:space="preserve">
+    <value>Pripojenie zlyhalo.</value>
+  </data>
+  <data name="Unexpected error:" xml:space="preserve">
+    <value>Neočekávaná chyba:</value>
+  </data>
 </root>

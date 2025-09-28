@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.Extensions.Localization;
 using NTDLS.Helpers;
+using Org.BouncyCastle.Asn1.Ocsp;
 using TightWiki.Models;
 
 namespace TightWiki.Controllers
@@ -10,7 +11,6 @@ namespace TightWiki.Controllers
     public class WikiControllerBase<T>(SignInManager<IdentityUser> signInManager, UserManager<IdentityUser> userManager, IStringLocalizer<T> localizer)
         : Controller
     {
-
         public SessionState SessionState { get; private set; } = new();
 
         public readonly SignInManager<IdentityUser> SignInManager = signInManager;
@@ -25,16 +25,24 @@ namespace TightWiki.Controllers
             => base.Redirect(url.EnsureNotNull());
 
         [NonAction]
-        protected string? GetQueryValue(string key)
-            => Request.Query[key];
+        protected V? GetQueryValue<V>(string key)
+        {
+            if (Request.Query.TryGetValue(key, out var value) && !string.IsNullOrEmpty(value))
+            {
+                return Converters.ConvertToNullable<V>(value);
+            }
+            return default;
+        }
 
         [NonAction]
-        protected string GetQueryValue(string key, string defaultValue)
-            => (string?)Request.Query[key] ?? defaultValue;
-
-        [NonAction]
-        protected int GetQueryValue(string key, int defaultValue)
-            => int.Parse(GetQueryValue(key, defaultValue.ToString()));
+        protected V GetQueryValue<V>(string key, V defaultValue)
+        {
+            if (Request.Query.TryGetValue(key, out var value) && !string.IsNullOrEmpty(value))
+            {
+                return Converters.ConvertToNullable<V>(value) ?? defaultValue;
+            }
+            return defaultValue;
+        }
 
         [NonAction]
         protected string? GetFormValue(string key)
@@ -54,7 +62,7 @@ namespace TightWiki.Controllers
 
         [NonAction]
         protected string Localize(string key, params object[] objs)
-            => String.Format(localizer[key].Value, objs);
+            => string.Format(localizer[key].Value, objs);
 
         /// <summary>
         /// Displays the successMessage unless the errorMessage is present.
@@ -66,10 +74,10 @@ namespace TightWiki.Controllers
             => Redirect($"{GlobalConfiguration.BasePath}/Utility/Notify?NotifySuccessMessage={Uri.EscapeDataString(message)}&RedirectUrl={Uri.EscapeDataString($"{GlobalConfiguration.BasePath}{redirectUrl}")}&RedirectTimeout=5");
 
         protected RedirectResult NotifyOfWarning(string message, string redirectUrl)
-            => Redirect($"{GlobalConfiguration.BasePath}/Utility/Notify?NotifyWarningMessage={Uri.EscapeDataString(message)}&RedirectUrl={Uri.EscapeDataString(Uri.EscapeDataString($"{GlobalConfiguration.BasePath}{redirectUrl}"))}");
+            => Redirect($"{GlobalConfiguration.BasePath}/Utility/Notify?NotifyWarningMessage={Uri.EscapeDataString(message)}&RedirectUrl={Uri.EscapeDataString($"{GlobalConfiguration.BasePath}{redirectUrl}")}");
 
         protected RedirectResult NotifyOfError(string message, string redirectUrl)
-            => Redirect($"{GlobalConfiguration.BasePath}/Utility/Notify?NotifyErrorMessage={Uri.EscapeDataString(message)}&RedirectUrl={Uri.EscapeDataString(Uri.EscapeDataString($"{GlobalConfiguration.BasePath}{redirectUrl}"))}");
+            => Redirect($"{GlobalConfiguration.BasePath}/Utility/Notify?NotifyErrorMessage={Uri.EscapeDataString(message)}&RedirectUrl={Uri.EscapeDataString($"{GlobalConfiguration.BasePath}{redirectUrl}")}");
 
         protected RedirectResult NotifyOfSuccess(string message)
             => Redirect($"{GlobalConfiguration.BasePath}/Utility/Notify?NotifySuccessMessage={Uri.EscapeDataString(message)}");

@@ -77,4 +77,46 @@
   <data name="Resend email confirmation" xml:space="preserve">
     <value>Повторно надіслати підтвердження електронної пошти</value>
   </data>
+  <data name="- or -" xml:space="preserve">
+    <value>- або -</value>
+  </data>
+  <data name="Sign in with {0}" xml:space="preserve">
+    <value>Увійти за допомогою {0}</value>
+  </data>
+  <data name="Username" xml:space="preserve">
+    <value>Ім'я користувача</value>
+  </data>
+  <data name="Failed to create the stub account for the LDAP credential." xml:space="preserve">
+    <value>Не вдалося створити обліковий запис-мішень для облікових даних LDAP.</value>
+  </data>
+  <data name="Failed to locate the user account for the LDAP credential." xml:space="preserve">
+    <value>Не вдалося знайти обліковий запис користувача для облікових даних LDAP.</value>
+  </data>
+  <data name="User created a new account with LDAP." xml:space="preserve">
+    <value>Користувач створив новий обліковий запис за допомогою LDAP.</value>
+  </data>
+  <data name="Failed to create stub account for the LDAP credential: {0}." xml:space="preserve">
+    <value>Не вдалося створити простий обліковий запис для LDAP облікових даних: {0}.</value>
+  </data>
+  <data name="Invalid login attempt." xml:space="preserve">
+    <value>Недійсна спроба входу.</value>
+  </data>
+  <data name="Failed to add login info for LDAP stub account: {0}." xml:space="preserve">
+    <value>Не вдалося додати інформацію для входу для простого облікового запису LDAP: {0}.</value>
+  </data>
+  <data name="Please enter both username and password." xml:space="preserve">
+    <value>Будь ласка, введіть як ім'я користувача, так і пароль.</value>
+  </data>
+  <data name="Request failed:" xml:space="preserve">
+    <value>Запит не вдалося виконати:</value>
+  </data>
+  <data name="Bind succeeded." xml:space="preserve">
+    <value>Зв'язок успішний.</value>
+  </data>
+  <data name="Bind failed." xml:space="preserve">
+    <value>Не вдалося встановити зв'язок.</value>
+  </data>
+  <data name="Unexpected error:" xml:space="preserve">
+    <value>Несподівана помилка:</value>
+  </data>
 </root>

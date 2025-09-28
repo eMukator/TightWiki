@@ -77,4 +77,46 @@
   <data name="Resend email confirmation" xml:space="preserve">
     <value>ای میل کی تصدیق دوبارہ بھیجیں</value>
   </data>
+  <data name="- or -" xml:space="preserve">
+    <value>- یا -</value>
+  </data>
+  <data name="Sign in with {0}" xml:space="preserve">
+    <value>کے ساتھ سائن ان کریں {0}</value>
+  </data>
+  <data name="Username" xml:space="preserve">
+    <value>صارف کا نام</value>
+  </data>
+  <data name="Failed to create the stub account for the LDAP credential." xml:space="preserve">
+    <value>LDAP اسناد کے لیے اسٹب اکاؤنٹ تخلیق کرنے میں ناکامی۔</value>
+  </data>
+  <data name="Failed to locate the user account for the LDAP credential." xml:space="preserve">
+    <value>LDAP اسناد کے لیے صارف اکاؤنٹ تلاش کرنے میں ناکامی۔</value>
+  </data>
+  <data name="User created a new account with LDAP." xml:space="preserve">
+    <value>صارف نے LDAP کے ساتھ نیا اکاؤنٹ بنایا۔</value>
+  </data>
+  <data name="Failed to create stub account for the LDAP credential: {0}." xml:space="preserve">
+    <value>LDAP کی اسناد کے لیے عارضی اکاؤنٹ بنانے میں ناکامی: {0}۔</value>
+  </data>
+  <data name="Invalid login attempt." xml:space="preserve">
+    <value>غلط لاگ ان کی کوشش۔</value>
+  </data>
+  <data name="Failed to add login info for LDAP stub account: {0}." xml:space="preserve">
+    <value>LDAP عارضی اکاؤنٹ کے لیے لاگ ان کی معلومات شامل کرنے میں ناکامی: {0}۔</value>
+  </data>
+  <data name="Please enter both username and password." xml:space="preserve">
+    <value>براہ کرم صارف نام اور پاس ورڈ دونوں درج کریں۔</value>
+  </data>
+  <data name="Request failed:" xml:space="preserve">
+    <value>درخواست ناکام ہوئی:</value>
+  </data>
+  <data name="Bind succeeded." xml:space="preserve">
+    <value>بائنڈ کامیاب ہوا۔</value>
+  </data>
+  <data name="Bind failed." xml:space="preserve">
+    <value>بائنڈ ناکام ہوا۔</value>
+  </data>
+  <data name="Unexpected error:" xml:space="preserve">
+    <value>غیر متوقع خرابی:</value>
+  </data>
 </root>

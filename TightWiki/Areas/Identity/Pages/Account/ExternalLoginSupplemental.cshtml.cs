@@ -18,7 +18,7 @@ namespace TightWiki.Areas.Identity.Pages.Account
         public List<LanguageItem> Languages { get; set; } = new();
 
 
-        [Display(Name = "Account Name")]
+        [Display(Name = "Display Name")]
         [Required(ErrorMessageResourceName = "RequiredAttribute_ValidationError", ErrorMessageResourceType = typeof(Models.Resources.ValTexts))]
         public string AccountName { get; set; } = string.Empty;
 
@@ -49,14 +49,17 @@ namespace TightWiki.Areas.Identity.Pages.Account
 
         private UserManager<IdentityUser> _userManager;
         private readonly IStringLocalizer<ExternalLoginSupplementalModel> _localizer;
+        private readonly ILogger<ExternalLoginSupplementalModel> _logger;
 
         public ExternalLoginSupplementalModel(
+            ILogger<ExternalLoginSupplementalModel> logger,
             SignInManager<IdentityUser> signInManager,
             UserManager<IdentityUser> userManager,
             IUserStore<IdentityUser> userStore,
             IStringLocalizer<ExternalLoginSupplementalModel> localizer)
             : base(signInManager)
         {
+            _logger = logger;
             _userManager = userManager;
             _localizer = localizer;
         }
@@ -66,15 +69,22 @@ namespace TightWiki.Areas.Identity.Pages.Account
 
         public IActionResult OnGet()
         {
-            ReturnUrl = WebUtility.UrlDecode(ReturnUrl ?? $"{GlobalConfiguration.BasePath}/");
-
-            if (GlobalConfiguration.AllowSignup != true)
+            try
             {
-                return Redirect($"{GlobalConfiguration.BasePath}/Identity/Account/RegistrationIsNotAllowed");
+                ReturnUrl = WebUtility.UrlDecode(ReturnUrl ?? $"{GlobalConfiguration.BasePath}/");
+
+                if (GlobalConfiguration.AllowSignup != true)
+                {
+                    return Redirect($"{GlobalConfiguration.BasePath}/Identity/Account/RegistrationIsNotAllowed");
+                }
+
+                PopulateDefaults();
             }
-
-            PopulateDefaults();
-
+            catch (Exception ex)
+            {
+                _logger.LogError("Exception: {Message}", ex.Message);
+                ExceptionRepository.InsertException(ex);
+            }
             return Page();
         }
 
@@ -98,62 +108,64 @@ namespace TightWiki.Areas.Identity.Pages.Account
 
         public async Task<IActionResult> OnPostAsync()
         {
-            ReturnUrl = WebUtility.UrlDecode(ReturnUrl ?? $"{GlobalConfiguration.BasePath}/");
-
-            if (GlobalConfiguration.AllowSignup != true)
+            try
             {
-                return Redirect($"{GlobalConfiguration.BasePath}/Identity/Account/RegistrationIsNotAllowed");
-            }
+                ReturnUrl = WebUtility.UrlDecode(ReturnUrl ?? $"{GlobalConfiguration.BasePath}/");
 
-            PopulateDefaults();
+                if (GlobalConfiguration.AllowSignup != true)
+                {
+                    return Redirect($"{GlobalConfiguration.BasePath}/Identity/Account/RegistrationIsNotAllowed");
+                }
 
-            if (!ModelState.IsValid)
+                PopulateDefaults();
+
+                if (!ModelState.IsValid)
+                {
+                    return Page();
+                }
+
+                if (string.IsNullOrWhiteSpace(Input.AccountName))
+                {
+                    ModelState.AddModelError("Input.AccountName", _localizer["Display Name is required."]);
+                    return Page();
+                }
+                else if (UsersRepository.DoesProfileAccountExist(Input.AccountName))
+                {
+                    ModelState.AddModelError("Input.AccountName", _localizer["Display Name is already in use."]);
+                    return Page();
+                }
+
+                var info = await SignInManager.GetExternalLoginInfoAsync();
+                if (info == null)
+                {
+                    return NotifyOfError(_localizer["An error occurred retrieving user information from the external provider."]);
+                }
+
+                var email = info.Principal.FindFirstValue(ClaimTypes.Email).EnsureNotNull();
+                if (string.IsNullOrEmpty(email))
+                {
+                    return NotifyOfError(_localizer["The email address was not supplied by the external provider."]);
+                }
+
+                var user = new IdentityUser { UserName = email, Email = email };
+                var result = await _userManager.CreateAsync(user);
+                if (!result.Succeeded)
+                {
+                    return NotifyOfError(_localizer["An error occurred while creating the user."]);
+                }
+
+                result = await _userManager.AddLoginAsync(user, info);
+                if (!result.Succeeded)
+                {
+                    return NotifyOfError(_localizer["An error occurred while adding the login."]);
+                }
+
+                var membershipConfig = ConfigurationRepository.GetConfigurationEntryValuesByGroupName(Constants.ConfigurationGroup.Membership);
+                UsersRepository.CreateProfile(Guid.Parse(user.Id), Input.AccountName);
+                UsersRepository.AddRoleMemberByname(Guid.Parse(user.Id), membershipConfig.Value<string>("Default Signup Role").EnsureNotNull());
+
+                var claimsToAdd = new List<Claim>
             {
-                return Page();
-            }
-
-            if (string.IsNullOrWhiteSpace(Input.AccountName))
-            {
-                ModelState.AddModelError("Input.AccountName", _localizer["Account Name is required."]);
-                return Page();
-            }
-            else if (UsersRepository.DoesProfileAccountExist(Input.AccountName))
-            {
-                ModelState.AddModelError("Input.AccountName", _localizer["Account Name is already in use."]);
-                return Page();
-            }
-
-            var info = await SignInManager.GetExternalLoginInfoAsync();
-            if (info == null)
-            {
-                return NotifyOfError(_localizer["An error occurred retrieving user information from the external provider."]);
-            }
-
-            var email = info.Principal.FindFirstValue(ClaimTypes.Email).EnsureNotNull();
-            if (string.IsNullOrEmpty(email))
-            {
-                return NotifyOfError(_localizer["The email address was not supplied by the external provider."]);
-            }
-
-            var user = new IdentityUser { UserName = email, Email = email };
-            var result = await _userManager.CreateAsync(user);
-            if (!result.Succeeded)
-            {
-                return NotifyOfError(_localizer["An error occurred while creating the user."]);
-            }
-
-            result = await _userManager.AddLoginAsync(user, info);
-            if (!result.Succeeded)
-            {
-                return NotifyOfError(_localizer["An error occurred while adding the login."]);
-            }
-
-            UsersRepository.CreateProfile(Guid.Parse(user.Id), Input.AccountName);
-
-            var membershipConfig = ConfigurationRepository.GetConfigurationEntryValuesByGroupName(Constants.ConfigurationGroup.Membership);
-            var claimsToAdd = new List<Claim>
-            {
-                new (ClaimTypes.Role, membershipConfig.Value<string>("Default Signup Role").EnsureNotNull()),
                 new ("timezone", Input.TimeZone),
                 new (ClaimTypes.Country, Input.Country),
                 new ("language", Input.Language),
@@ -161,9 +173,15 @@ namespace TightWiki.Areas.Identity.Pages.Account
                 new ("lastname", Input.LastName ?? ""),
             };
 
-            SecurityRepository.UpsertUserClaims(_userManager, user, claimsToAdd);
+                SecurityRepository.UpsertUserClaims(_userManager, user, claimsToAdd);
 
-            await SignInManager.SignInAsync(user, isPersistent: false);
+                await SignInManager.SignInAsync(user, isPersistent: false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError("Exception: {Message}", ex.Message);
+                ExceptionRepository.InsertException(ex);
+            }
 
             if (string.IsNullOrEmpty(ReturnUrl))
             {

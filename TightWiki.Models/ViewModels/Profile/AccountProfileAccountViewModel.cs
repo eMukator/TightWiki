@@ -14,7 +14,7 @@ namespace TightWiki.Models.ViewModels.Profile
         [Display(Name = "Email Address")]
         public string EmailAddress { get; set; } = string.Empty;
 
-        [Display(Name = "Account Name")]
+        [Display(Name = "Display Name")]
         [Required(ErrorMessageResourceName = "RequiredAttribute_ValidationError", ErrorMessageResourceType = typeof(Models.Resources.ValTexts))]
         public string AccountName { get; set; } = string.Empty;
 
@@ -52,8 +52,7 @@ namespace TightWiki.Models.ViewModels.Profile
         public int PaginationPageSize { get; set; }
         public int PaginationPageCount { get; set; }
 
-        [Display(Name = "Role")]
-        public string? Role { get; set; } = string.Empty;
+        //public string? Role { get; set; } = string.Empty;
 
         public static AccountProfileAccountViewModel FromDataModel(AccountProfile model)
         {
@@ -74,7 +73,7 @@ namespace TightWiki.Models.ViewModels.Profile
                 ModifiedDate = model.ModifiedDate,
                 Navigation = model.Navigation,
                 PaginationPageCount = model.PaginationPageCount,
-                Role = model.Role,
+                //Role = model.Role,
                 PaginationPageSize = model.PaginationPageSize,
                 TimeZone = model.TimeZone
             };

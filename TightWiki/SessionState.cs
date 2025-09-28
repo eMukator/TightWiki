@@ -4,26 +4,33 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using NTDLS.Helpers;
 using System.Security.Claims;
+using TightWiki.Caching;
 using TightWiki.Exceptions;
+using TightWiki.Extensions;
 using TightWiki.Library;
 using TightWiki.Library.Interfaces;
 using TightWiki.Models;
 using TightWiki.Models.DataModels;
 using TightWiki.Repository;
+using TightWiki.Static;
 using static TightWiki.Library.Constants;
 
 namespace TightWiki
 {
     public class SessionState : ISessionState
     {
+        private readonly string _denyString = WikiPermissionDisposition.Deny.ToString();
+        private readonly string _allowString = WikiPermissionDisposition.Allow.ToString();
+
         public IQueryCollection? QueryString { get; set; }
 
         #region Authentication.
 
         public bool IsAuthenticated { get; set; }
         public IAccountProfile? Profile { get; set; }
-        public string Role { get; set; } = string.Empty;
+        public bool IsAdministrator { get; set; }
         public Theme UserTheme { get; set; } = new();
+        public List<ApparentPermission> Permissions { get; set; } = new();
 
         #endregion
 
@@ -84,7 +91,7 @@ namespace TightWiki
             {
                 try
                 {
-                    string emailAddress = (user.Claims.First(x => x.Type == ClaimTypes.Email)?.Value).EnsureNotNull();
+                    //string emailAddress = (user.Claims.First(x => x.Type == ClaimTypes.Email)?.Value).EnsureNotNull();
 
                     if (user.Identity?.IsAuthenticated == true)
                     {
@@ -93,9 +100,11 @@ namespace TightWiki
                         if (UsersRepository.TryGetBasicProfileByUserId(userId, out var profile))
                         {
                             Profile = profile;
-                            Role = Profile.Role;
+                            IsAdministrator = UsersRepository.IsUserMemberOfAdministrators(userId);
+                            Permissions = UsersRepository.GetApparentAccountPermissions(userId).ToList();
                             UserTheme = ConfigurationRepository.GetAllThemes().SingleOrDefault(o => o.Name == Profile.Theme) ?? GlobalConfiguration.SystemTheme;
                             IsAuthenticated = true;
+                            return;
                         }
                         else
                         {
@@ -115,6 +124,8 @@ namespace TightWiki
                     ExceptionRepository.InsertException(ex);
                 }
             }
+
+            Permissions = UsersRepository.GetApparentRolePermissions(WikiRoles.Anonymous).ToList();
         }
 
         /// <summary>
@@ -142,114 +153,189 @@ namespace TightWiki
 
         #region Permissions.
 
-        public bool IsMemberOf(string role, string[] roles)
-            => roles.Contains(role);
+        /// <summary>
+        /// Returns true if the user holds any of the the given permissions for the current page.
+        /// This is only applicable after SetPageId() has been called, to this is intended to be used in views NOT controllers.
+        /// </summary>
+        public bool HoldsPermission(WikiPermission[] permissions)
+            => HoldsPermission(Page.Navigation, permissions);
+
+        /// <summary>
+        /// Returns true if the user holds the given permission for the current page.
+        /// This is only applicable after SetPageId() has been called, to this is intended to be used in views NOT controllers.
+        /// </summary>
+        public bool HoldsPermission(WikiPermission permission)
+            => HoldsPermission(Page.Navigation, permission);
+
+        /// <summary>
+        /// Returns true if the user holds the given permission for given page.
+        /// </summary>
+        public bool HoldsPermission(string? givenCanonical, WikiPermission permission)
+            => HoldsPermission(givenCanonical, [permission]);
+
+        /// <summary>
+        /// Returns true if the user holds any of the given permission for given page.
+        /// </summary>
+        public bool HoldsPermission(string? givenCanonical, WikiPermission[] permissions)
+        {
+            if (IsAdministrator)
+            {
+                return true;
+            }
+
+            var cacheKey = WikiCacheKeyFunction.Build(WikiCache.Category.Security, [givenCanonical, Profile?.UserId, string.Join("|", permissions).ToLowerInvariant()]);
+
+            return WikiCache.AddOrGet(cacheKey, () =>
+            {
+                Models.DataModels.Page? page = null;
+
+                if (givenCanonical != null)
+                {
+                    var navigation = new NamespaceNavigation(givenCanonical);
+                    page = PageRepository.GetPageInfoByNavigation(navigation.Canonical);
+                }
+
+                foreach (var permission in permissions)
+                {
+                    //Remember that we are evaluating to see if the user holds ANY one of the supplied permissions.
+                    //So, we are going to evaluate each permission in the supplied array individually,
+                    //  ignoring any NULL results (as NULL means that the permission was not explicitly allowed or denied).
+                    //If the permission is explicitly allowed, we return true.
+                    //If the permission is explicitly denied, we move to the next permission because permission could
+                    //  have been denied on a namespace but explicitly allowed on a page (and yes, we test in that order).
+                    //Also note that we do not pass the page when the permission is Create - because that would make no sense.
+                    if (EvaluatePermission(permission, permission == WikiPermission.Create ? null : page) == true)
+                    {
+                        return true;
+                    }
+                }
+                return false;
+            }, WikiCache.DefaultCacheSeconds);
+        }
+
+        private bool? EvaluatePermission(WikiPermission permission, Models.DataModels.Page? page)
+        {
+            string permissionString = permission.ToString();
+
+            if (page != null)
+            {
+                var pageIdString = page.Id.ToString();
+
+                //Check to see the the user has been explicitly denied access to the current page.
+                if (Permissions.Any(o => o.PageId == pageIdString
+                    && o.Permission.Equals(permissionString, StringComparison.InvariantCultureIgnoreCase)
+                    && o.PermissionDisposition.Equals(_denyString, StringComparison.InvariantCultureIgnoreCase)))
+                {
+                    return false;
+                }
+                //Check to see the the user has been explicitly granted access to the current page.
+                if (Permissions.Any(o => o.PageId == pageIdString
+                    && o.Permission.Equals(permissionString, StringComparison.InvariantCultureIgnoreCase)
+                    && o.PermissionDisposition.Equals(_allowString, StringComparison.InvariantCultureIgnoreCase)))
+                {
+                    return true;
+                }
+
+                //Check to see the the user has been explicitly denied access to the current namespace.
+                if (Permissions.Any(o => o.Namespace?.Equals(page.Namespace, StringComparison.InvariantCultureIgnoreCase) == true
+                    && o.Permission.Equals(permissionString, StringComparison.InvariantCultureIgnoreCase)
+                    && o.PermissionDisposition.Equals(_denyString, StringComparison.InvariantCultureIgnoreCase)))
+                {
+                    return false;
+                }
+
+                //Check to see the the user has been explicitly granted access to the current namespace.
+                if (Permissions.Any(o => o.Namespace?.Equals(page.Namespace, StringComparison.InvariantCultureIgnoreCase) == true
+                    && o.Permission.Equals(permissionString, StringComparison.InvariantCultureIgnoreCase)
+                    && o.PermissionDisposition.Equals(_allowString, StringComparison.InvariantCultureIgnoreCase)))
+                {
+                    return true;
+                }
+            }
+
+            //Check to see the the user has been explicitly denied access to all pages.
+            if (Permissions.Any(o => o.PageId?.Equals("*", StringComparison.InvariantCultureIgnoreCase) == true
+                && o.Permission.Equals(permissionString, StringComparison.InvariantCultureIgnoreCase)
+                && o.PermissionDisposition.Equals(_denyString, StringComparison.InvariantCultureIgnoreCase)))
+            {
+                return false;
+            }
+
+            //Check to see the the user has been explicitly granted access to all pages.
+            if (Permissions.Any(o => o.PageId?.Equals("*", StringComparison.InvariantCultureIgnoreCase) == true
+                && o.Permission.Equals(permissionString, StringComparison.InvariantCultureIgnoreCase)
+                && o.PermissionDisposition.Equals(_allowString, StringComparison.InvariantCultureIgnoreCase)))
+            {
+                return true;
+            }
+
+            //Check to see the the user has been explicitly denied access to all namespaces.
+            if (Permissions.Any(o => o.Namespace?.Equals("*", StringComparison.InvariantCultureIgnoreCase) == true
+                && o.Permission.Equals(permissionString, StringComparison.InvariantCultureIgnoreCase)
+                && o.PermissionDisposition.Equals(_denyString, StringComparison.InvariantCultureIgnoreCase)))
+            {
+                return false;
+            }
+
+            //Check to see the the user has been explicitly granted access to all namespaces.
+            if (Permissions.Any(o => o.Namespace?.Equals("*", StringComparison.InvariantCultureIgnoreCase) == true
+                && o.Permission.Equals(permissionString, StringComparison.InvariantCultureIgnoreCase)
+                && o.PermissionDisposition.Equals(_allowString, StringComparison.InvariantCultureIgnoreCase)))
+            {
+                return true;
+            }
+
+            return null;
+        }
 
         public void RequireAuthorizedPermission()
         {
-            if (!IsAuthenticated) throw new UnauthorizedException();
-        }
-
-        public void RequireEditPermission()
-        {
-            if (!CanEdit) throw new UnauthorizedException();
-        }
-
-        public void RequireViewPermission()
-        {
-            if (!CanView) throw new UnauthorizedException();
-        }
-
-        public void RequireAdminPermission()
-        {
-            if (!CanAdmin) throw new UnauthorizedException();
-        }
-
-        public void RequireModeratePermission()
-        {
-            if (!CanModerate) throw new UnauthorizedException();
-        }
-
-        public void RequireCreatePermission()
-        {
-            if (!CanCreate) throw new UnauthorizedException();
-        }
-
-        public void RequireDeletePermission()
-        {
-            if (!CanDelete) throw new UnauthorizedException();
-        }
-
-        /// <summary>
-        /// Is the current user (or anonymous) allowed to view?
-        /// </summary>
-        public bool CanView => true;
-
-        /// <summary>
-        /// Is the current user allowed to edit?
-        /// </summary>
-        public bool CanEdit
-        {
-            get
+            if (!IsAuthenticated)
             {
-                if (IsAuthenticated)
-                {
-                    if (PageInstructions.Contains(WikiInstruction.Protect))
-                    {
-                        return IsMemberOf(Role, [Roles.Administrator, Roles.Moderator]);
-                    }
-
-                    return IsMemberOf(Role, [Roles.Administrator, Roles.Contributor, Roles.Moderator]);
-                }
-                return false;
+                throw new UnauthorizedException(StaticLocalizer.Localizer["You are not authorized"]);
             }
         }
 
         /// <summary>
-        /// Is the current user allowed to perform administrative functions?
+        /// Throws an exception if the user does not hold any of the given permission for given page.
         /// </summary>
-        public bool CanAdmin =>
-            IsAuthenticated && IsMemberOf(Role, [Roles.Administrator]);
-
-        /// <summary>
-        /// Is the current user allowed to moderate content (such as delete comments, and view moderation tools)?
-        /// </summary>
-        public bool CanModerate =>
-            IsAuthenticated && IsMemberOf(Role, [Roles.Administrator, Roles.Moderator]);
-
-        /// <summary>
-        /// Is the current user allowed to create pages?
-        /// </summary>
-        public bool CanCreate =>
-            IsAuthenticated && IsMemberOf(Role, [Roles.Administrator, Roles.Contributor, Roles.Moderator]);
-
-        /// <summary>
-        /// Is the current user allowed to delete unprotected pages?
-        /// </summary>
-        public bool CanDelete
+        public void RequirePermission(string? givenCanonical, WikiPermission[] permissions)
         {
-            get
+            if (!HoldsPermission(givenCanonical, permissions))
             {
-                if (IsAuthenticated)
-                {
-                    if (PageInstructions.Contains(WikiInstruction.Protect))
-                    {
-                        return false;
-                    }
+                throw new UnauthorizedException(StaticLocalizer.Localizer["You do not have permission to perform the action: {0}"]
+                    .Format(string.Join(", ", permissions.Select(o => StaticLocalizer.Localizer[o.ToString()]))));
+            }
+        }
 
-                    return IsMemberOf(Role, [Roles.Administrator, Roles.Moderator]);
-                }
+        /// <summary>
+        /// Throws an exception if the user does not hold the given permission for given page.
+        /// </summary>
+        public void RequirePermission(string? givenCanonical, WikiPermission permission)
+        {
+            if (!HoldsPermission(givenCanonical, permission))
+            {
+                throw new UnauthorizedException(StaticLocalizer.Localizer["You do not have permission to perform the action: {0}"]
+                    .Format(StaticLocalizer.Localizer[permission.ToString()]));
+            }
+        }
 
-                return false;
+        /// <summary>
+        /// Throws an exception if the user is not an administrator.
+        /// </summary>
+        public void RequireAdminPermission()
+        {
+            if (!IsAdministrator)
+            {
+                throw new UnauthorizedException(StaticLocalizer.Localizer["You do not have permission to perform the action: {0}"]
+                    .Format(StaticLocalizer.Localizer["Administration"].Value));
             }
         }
 
         #endregion
 
         public DateTime LocalizeDateTime(DateTime datetime)
-        {
-            return TimeZoneInfo.ConvertTimeFromUtc(datetime, GetPreferredTimeZone());
-        }
+            => TimeZoneInfo.ConvertTimeFromUtc(datetime, GetPreferredTimeZone());
 
         public TimeZoneInfo GetPreferredTimeZone()
         {

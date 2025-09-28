@@ -77,4 +77,46 @@
   <data name="Resend email confirmation" xml:space="preserve">
     <value>Renvoyer la confirmation par email</value>
   </data>
+  <data name="- or -" xml:space="preserve">
+    <value>- ou -</value>
+  </data>
+  <data name="Sign in with {0}" xml:space="preserve">
+    <value>Connectez-vous avec {0}</value>
+  </data>
+  <data name="Username" xml:space="preserve">
+    <value>Nom d'utilisateur</value>
+  </data>
+  <data name="Failed to create the stub account for the LDAP credential." xml:space="preserve">
+    <value>Échec de la création du compte provisoire pour l'identifiant LDAP.</value>
+  </data>
+  <data name="Failed to locate the user account for the LDAP credential." xml:space="preserve">
+    <value>Échec de la localisation du compte utilisateur pour l'identifiant LDAP.</value>
+  </data>
+  <data name="User created a new account with LDAP." xml:space="preserve">
+    <value>L'utilisateur a créé un nouveau compte avec LDAP.</value>
+  </data>
+  <data name="Failed to create stub account for the LDAP credential: {0}." xml:space="preserve">
+    <value>Échec de la création du compte stub pour les informations d'identification LDAP : {0}.</value>
+  </data>
+  <data name="Invalid login attempt." xml:space="preserve">
+    <value>Tentative de connexion invalide.</value>
+  </data>
+  <data name="Failed to add login info for LDAP stub account: {0}." xml:space="preserve">
+    <value>Échec de l'ajout des informations de connexion pour le compte stub LDAP : {0}.</value>
+  </data>
+  <data name="Please enter both username and password." xml:space="preserve">
+    <value>Veuillez entrer à la fois le nom d'utilisateur et le mot de passe.</value>
+  </data>
+  <data name="Request failed:" xml:space="preserve">
+    <value>La demande a échoué :</value>
+  </data>
+  <data name="Bind succeeded." xml:space="preserve">
+    <value>La liaison a réussi.</value>
+  </data>
+  <data name="Bind failed." xml:space="preserve">
+    <value>La liaison a échoué.</value>
+  </data>
+  <data name="Unexpected error:" xml:space="preserve">
+    <value>Erreur inattendue :</value>
+  </data>
 </root>

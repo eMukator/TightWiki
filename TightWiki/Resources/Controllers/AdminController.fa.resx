@@ -59,6 +59,9 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
+  <data name="LDAP error: {0}." xml:space="preserve">
+    <value>خطای LDAP: {0}.</value>
+  </data>
   <data name="Account name is already in use." xml:space="preserve">
     <value>نام حساب کاربری قبلاً استفاده شده است.</value>
   </data>
@@ -221,6 +224,12 @@
   <data name="The pages orphaned attachments have been purged." xml:space="preserve">
     <value>پیوست‌های صفحات یتیم پاک شده‌اند.</value>
   </data>
+  <data name="The specified emoji has been deleted." xml:space="preserve">
+    <value>ایموجی مشخص شده حذف شده است.</value>
+  </data>
+  <data name="The specified menu item has been deleted." xml:space="preserve">
+    <value>آیتم منوی مشخص شده حذف شده است.</value>
+  </data>
   <data name="The specified page could not be found." xml:space="preserve">
     <value>صفحه مشخص شده پیدا نشد.</value>
   </data>
@@ -253,5 +262,23 @@
   </data>
   <data name="{0} Delete" xml:space="preserve">
     <value>{0} حذف</value>
+  </data>
+  <data name="LDAP challenge failed." xml:space="preserve">
+    <value>چالش LDAP موفق نشد.</value>
+  </data>
+  <data name="LDAP challenge succeeded (partially provisioned account)." xml:space="preserve">
+    <value>چالش LDAP موفق شد (حساب نیمه تأمین شده).</value>
+  </data>
+  <data name="LDAP challenge succeeded (fully provisioned account)." xml:space="preserve">
+    <value>چالش LDAP موفق شد (حساب به‌طور کامل تأمین شده).</value>
+  </data>
+  <data name="LDAP challenge succeeded, but the user does not have an objectGUID attribute." xml:space="preserve">
+    <value>چالش LDAP موفق شد، اما کاربر ویژگی objectGUID ندارد.</value>
+  </data>
+  <data name="LDAP authentication is not enabled." xml:space="preserve">
+    <value>احراز هویت LDAP فعال نیست.</value>
+  </data>
+  <data name="LDAP challenge succeeded (un-provisioned account)." xml:space="preserve">
+    <value>چالش LDAP با موفقیت انجام شد (حساب بدون تأمین).</value>
   </data>
 </root>

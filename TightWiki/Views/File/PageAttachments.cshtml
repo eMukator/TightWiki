@@ -1,4 +1,5 @@
 ﻿@using TightWiki.Models
+@using static TightWiki.Library.Constants
 @inject IViewLocalizer Localizer
 @model TightWiki.Models.ViewModels.File.FileAttachmentViewModel
 @{
@@ -33,20 +34,19 @@
             $('a.nav-link').removeClass('text-dark').addClass('@sessionState.UserTheme.ClassNavLink');
             $('a.dropdown-item').removeClass('text-dark').addClass('@sessionState.UserTheme.ClassDropdown');
             $('span.glyphicon').removeClass('text-dark').addClass('@sessionState.UserTheme.ClassBranding');
-
-            $('a[href="#detachLink"]').click(function (e) {
-                var fileName = e.target.id;
-                if (confirm("@(Localizer["Are you sure you want to detach"]) '" + fileName + "'?")) {
-                    $.ajax({
-                        type: 'POST',
-                        url: '@GlobalConfiguration.BasePath/File/Detach/@Model.PageNavigation/' + fileName + '/@Model.PageRevision',
-                        success: function (result) {
-                            $("#uploadedFiles").load("@GlobalConfiguration.BasePath/File/PageAttachments/@Model.PageNavigation");
-                        }
-                    });
-                }
-            });
         });
+
+        function detachFile(fileName) {
+            if (confirm("@(Localizer["Are you sure you want to detach"]) '" + fileName + "'?")) {
+                $.ajax({
+                    type: 'POST',
+                    url: '@GlobalConfiguration.BasePath/File/Detach/@Model.PageNavigation/' + fileName + '/@Model.PageRevision',
+                    success: function (result) {
+                        $("#uploadedFiles").load("@GlobalConfiguration.BasePath/File/PageAttachments/@Model.PageNavigation");
+                    }
+                });
+            }
+        }
 
         function copyToClipboard(text, element) {
 
@@ -89,7 +89,7 @@
                 <button class="btn btn-thin btn-primary me-0" onclick="copyToClipboard('@x.Name', this); return false;">
                     <i class="bi bi-clipboard"></i>@Localizer["Copy Tag"]
                 </button>
-                @if (@sessionState.CanDelete == true)
+                @if (sessionState.HoldsPermission(WikiPermission.Delete))
                 {
                     <button type="button"class="btn btn-thin btn-danger ms-0" data-file="@x.FileNavigation" onclick="detachFile(this.dataset.file)"> @Localizer["Detach"]</button>
                 }

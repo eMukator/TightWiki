@@ -11,6 +11,7 @@ using TightWiki.Models;
 using TightWiki.Models.DataModels;
 using TightWiki.Models.ViewModels.File;
 using TightWiki.Repository;
+using static TightWiki.Library.Constants;
 using static TightWiki.Library.Images;
 
 namespace TightWiki.Controllers
@@ -34,9 +35,10 @@ namespace TightWiki.Controllers
             var pageNavigation = new NamespaceNavigation(givenPageNavigation);
             var fileNavigation = new NamespaceNavigation(givenFileNavigation);
 
-            int givenScale = GetQueryValue("Scale", 100);
+            var scale = GetQueryValue<int?>("Scale");
+            var maxWidth = GetQueryValue<int?>("MaxWidth");
 
-            var cacheKey = WikiCacheKeyFunction.Build(WikiCache.Category.Page, [givenPageNavigation, givenFileNavigation, fileRevision, givenScale]);
+            var cacheKey = WikiCacheKeyFunction.Build(WikiCache.Category.Page, [givenPageNavigation, givenFileNavigation, fileRevision, scale, maxWidth]);
             if (WikiCache.TryGet<ImageCacheItem>(cacheKey, out var cached))
             {
                 return File(cached.Bytes, cached.ContentType);
@@ -53,14 +55,15 @@ namespace TightWiki.Controllers
 
                 var img = SixLabors.ImageSharp.Image.Load(new MemoryStream(file.Data));
 
-                if (givenScale > 500)
+                if (scale > 500)
                 {
-                    givenScale = 500;
+                    scale = 500;
                 }
-                if (givenScale != 100)
+                //Enforce scale if specified.
+                if (scale != null && scale != 100)
                 {
-                    int width = (int)(img.Width * (givenScale / 100.0));
-                    int height = (int)(img.Height * (givenScale / 100.0));
+                    int width = (int)(img.Width * (scale / 100.0));
+                    int height = (int)(img.Height * (scale / 100.0));
 
                     //Adjusting by a ratio (and especially after applying additional scaling) may have caused one
                     //  dimension to become very small (or even negative). So here we will check the height and width
@@ -93,6 +96,21 @@ namespace TightWiki.Controllers
                         return File(cacheItem.Bytes, cacheItem.ContentType);
                     }
                 }
+                //Enforce max width if specified.
+                else if (maxWidth > 0 && img.Width > maxWidth)
+                {
+                    double widthScale = (double)maxWidth / img.Width;
+
+                    int width = Math.Max(1, (int)Math.Round(img.Width * widthScale));
+                    int height = Math.Max(1, (int)Math.Round(img.Height * widthScale));
+
+                    using var image = ResizeImage(img, width, height);
+                    using var ms = new MemoryStream();
+                    file.ContentType = BestEffortConvertImage(image, ms, file.ContentType);
+                    var cacheItem = new ImageCacheItem(ms.ToArray(), file.ContentType);
+                    WikiCache.Put(cacheKey, cacheItem);
+                    return File(cacheItem.Bytes, cacheItem.ContentType);
+                }
                 else
                 {
                     return File(file.Data, file.ContentType);
@@ -114,14 +132,21 @@ namespace TightWiki.Controllers
         [HttpGet("Png/{givenPageNavigation}/{givenFileNavigation}/{fileRevision:int?}")]
         public ActionResult Png(string givenPageNavigation, string givenFileNavigation, int? fileRevision = null)
         {
-            SessionState.RequireViewPermission();
-
+            try
+            {
+                SessionState.RequirePermission(givenPageNavigation, WikiPermission.Read);
+            }
+            catch (Exception ex)
+            {
+                return NotifyOfError(ex.GetBaseException().Message, "/");
+            }
             var pageNavigation = new NamespaceNavigation(givenPageNavigation);
             var fileNavigation = new NamespaceNavigation(givenFileNavigation);
 
-            int givenScale = GetQueryValue("Scale", 100);
+            var scale = GetQueryValue<int?>("Scale");
+            var maxWidth = GetQueryValue<int?>("MaxWidth");
 
-            var cacheKey = WikiCacheKeyFunction.Build(WikiCache.Category.Page, [givenPageNavigation, givenFileNavigation, fileRevision, givenScale]);
+            var cacheKey = WikiCacheKeyFunction.Build(WikiCache.Category.Page, [givenPageNavigation, givenFileNavigation, fileRevision, scale, maxWidth]);
             if (WikiCache.TryGet<ImageCacheItem>(cacheKey, out var cached))
             {
                 return File(cached.Bytes, cached.ContentType);
@@ -132,15 +157,16 @@ namespace TightWiki.Controllers
             {
                 var img = SixLabors.ImageSharp.Image.Load(new MemoryStream(Utility.Decompress(file.Data)));
 
-                if (givenScale > 500)
+                if (scale > 500)
                 {
-                    givenScale = 500;
+                    scale = 500;
                 }
 
-                if (givenScale != 100)
+                //Enforce scale if specified.
+                if (scale != null && scale != 100)
                 {
-                    int width = (int)(img.Width * (givenScale / 100.0));
-                    int height = (int)(img.Height * (givenScale / 100.0));
+                    int width = (int)(img.Width * (scale / 100.0));
+                    int height = (int)(img.Height * (scale / 100.0));
 
                     //Adjusting by a ratio (and especially after applying additional scaling) may have caused one
                     //  dimension to become very small (or even negative). So here we will check the height and width
@@ -157,6 +183,22 @@ namespace TightWiki.Controllers
                         height += difference;
                         width += difference;
                     }
+
+                    using var image = Images.ResizeImage(img, width, height);
+                    using var ms = new MemoryStream();
+                    image.SaveAsPng(ms);
+
+                    var cacheItem = new ImageCacheItem(ms.ToArray(), "image/png");
+                    WikiCache.Put(cacheKey, cacheItem);
+                    return File(cacheItem.Bytes, cacheItem.ContentType);
+                }
+                //Enforce max width if specified.
+                else if (maxWidth > 0 && img.Width > maxWidth)
+                {
+                    double widthScale = (double)maxWidth / img.Width;
+
+                    int width = Math.Max(1, (int)Math.Round(img.Width * widthScale));
+                    int height = Math.Max(1, (int)Math.Round(img.Height * widthScale));
 
                     using var image = Images.ResizeImage(img, width, height);
                     using var ms = new MemoryStream();
@@ -193,8 +235,14 @@ namespace TightWiki.Controllers
         [HttpGet("Binary/{givenPageNavigation}/{givenFileNavigation}/{fileRevision:int?}")]
         public ActionResult Binary(string givenPageNavigation, string givenFileNavigation, int? fileRevision = null)
         {
-            SessionState.RequireViewPermission();
-
+            try
+            {
+                SessionState.RequirePermission(givenPageNavigation, WikiPermission.Read);
+            }
+            catch (Exception ex)
+            {
+                return NotifyOfError(ex.GetBaseException().Message, "/");
+            }
             var pageNavigation = new NamespaceNavigation(givenPageNavigation);
             var fileNavigation = new NamespaceNavigation(givenFileNavigation);
 
@@ -218,8 +266,14 @@ namespace TightWiki.Controllers
         [HttpGet("Revisions/{givenPageNavigation}/{givenFileNavigation}")]
         public ActionResult Revisions(string givenPageNavigation, string givenFileNavigation)
         {
-            SessionState.RequireViewPermission();
-
+            try
+            {
+                SessionState.RequirePermission(givenPageNavigation, WikiPermission.Read);
+            }
+            catch (Exception ex)
+            {
+                return NotifyOfError(ex.GetBaseException().Message, "/");
+            }
             var pageNavigation = new NamespaceNavigation(givenPageNavigation);
             var fileNavigation = new NamespaceNavigation(givenFileNavigation);
 
@@ -243,8 +297,14 @@ namespace TightWiki.Controllers
         [HttpGet("PageAttachments/{givenPageNavigation}")]
         public ActionResult PageAttachments(string givenPageNavigation)
         {
-            SessionState.RequireCreatePermission();
-
+            try
+            {
+                SessionState.RequirePermission(givenPageNavigation, WikiPermission.Read);
+            }
+            catch (Exception ex)
+            {
+                return NotifyOfError(ex.GetBaseException().Message, "/");
+            }
             var pageNavigation = new NamespaceNavigation(givenPageNavigation);
 
             var page = PageRepository.GetPageRevisionByNavigation(pageNavigation);
@@ -273,8 +333,14 @@ namespace TightWiki.Controllers
         [HttpPost("UploadDragDrop/{givenPageNavigation}")]
         public IActionResult UploadDragDrop(string givenPageNavigation, List<IFormFile> postedFiles)
         {
-            SessionState.RequireCreatePermission();
-
+            try
+            {
+                SessionState.RequirePermission(givenPageNavigation, [WikiPermission.Create, WikiPermission.Edit]);
+            }
+            catch (Exception ex)
+            {
+                return NotifyOfError(ex.GetBaseException().Message, "/");
+            }
             try
             {
                 var pageNavigation = new NamespaceNavigation(givenPageNavigation);
@@ -324,8 +390,14 @@ namespace TightWiki.Controllers
         [HttpPost("ManualUpload/{givenPageNavigation}")]
         public IActionResult ManualUpload(string givenPageNavigation, IFormFile fileData)
         {
-            SessionState.RequireCreatePermission();
-
+            try
+            {
+                SessionState.RequirePermission(givenPageNavigation, [WikiPermission.Create, WikiPermission.Edit]);
+            }
+            catch (Exception ex)
+            {
+                return NotifyOfError(ex.GetBaseException().Message, "/");
+            }
             var pageNavigation = new NamespaceNavigation(givenPageNavigation);
 
             var page = PageRepository.GetPageInfoByNavigation(pageNavigation.Canonical).EnsureNotNull();
@@ -366,8 +438,14 @@ namespace TightWiki.Controllers
         [HttpPost("Detach/{givenPageNavigation}/{givenFileNavigation}/{pageRevision}")]
         public ActionResult Detach(string givenPageNavigation, string givenFileNavigation, int pageRevision)
         {
-            SessionState.RequireDeletePermission();
-
+            try
+            {
+                SessionState.RequirePermission(givenPageNavigation, WikiPermission.Delete);
+            }
+            catch (Exception ex)
+            {
+                return NotifyOfError(ex.GetBaseException().Message, "/");
+            }
             PageFileRepository.DetachPageRevisionAttachment(
                 new NamespaceNavigation(givenPageNavigation).Canonical,
                 new NamespaceNavigation(givenFileNavigation).Canonical, pageRevision);
@@ -375,28 +453,41 @@ namespace TightWiki.Controllers
             return Content(Localize("Success"));
         }
 
+        #region AutoComplete.
+
+        [Authorize]
+        [HttpGet("AutoCompleteEmoji")]
+        public ActionResult AutoCompleteEmoji([FromQuery] string? q = null)
+        {
+            var roles = EmojiRepository.AutoCompleteEmoji(q ?? string.Empty).ToList();
+
+            return Json(roles.Select(o => new
+            {
+                text = o
+            }));
+        }
+
+        #endregion
 
         /// <summary>
         /// Gets a file from the database, converts it to a PNG with optional scaling and returns it to the client.
         /// </summary>
         [AllowAnonymous]
-        [HttpGet("Emoji/{givenPageNavigation}")]
-        public ActionResult Emoji(string givenPageNavigation)
+        [HttpGet("Emoji/{givenEmojiNavigation}")]
+        public ActionResult Emoji(string givenEmojiNavigation)
         {
-            SessionState.RequireViewPermission();
+            var emojiNavigation = Navigation.Clean(givenEmojiNavigation);
 
-            var pageNavigation = Navigation.Clean(givenPageNavigation);
-
-            if (string.IsNullOrEmpty(pageNavigation) == false)
+            if (string.IsNullOrEmpty(emojiNavigation) == false)
             {
-                string scale = GetQueryValue("Scale", "100");
+                var givenScale = GetQueryValue("Scale", 100);
 
-                string shortcut = $"%%{pageNavigation.ToLowerInvariant()}%%";
+                string shortcut = $"%%{emojiNavigation.ToLowerInvariant()}%%";
                 var emoji = GlobalConfiguration.Emojis.Where(o => o.Shortcut == shortcut).FirstOrDefault();
                 if (emoji != null)
                 {
                     //Do we have this scale cached already?
-                    var scaledImageCacheKey = WikiCacheKey.Build(WikiCache.Category.Emoji, [shortcut, scale]);
+                    var scaledImageCacheKey = WikiCacheKey.Build(WikiCache.Category.Emoji, [shortcut, givenScale]);
                     if (WikiCache.TryGet<ImageCacheItem>(scaledImageCacheKey, out var cachedEmoji))
                     {
                         return File(cachedEmoji.Bytes, cachedEmoji.ContentType);
@@ -411,7 +502,7 @@ namespace TightWiki.Controllers
 
                         if (emoji.ImageData == null)
                         {
-                            return NotFound(Localize("Emoji {0} was not found", pageNavigation));
+                            return NotFound(Localize("Emoji {0} was not found", emojiNavigation));
                         }
 
                         WikiCache.Put(imageCacheKey, emoji.ImageData);
@@ -423,17 +514,16 @@ namespace TightWiki.Controllers
 
                         var img = SixLabors.ImageSharp.Image.Load(new MemoryStream(decompressedImageBytes));
 
-                        int customScalePercent = int.Parse(scale);
-                        if (customScalePercent > 500)
+                        if (givenScale > 500)
                         {
-                            customScalePercent = 500;
+                            givenScale = 500;
                         }
 
                         var (Width, Height) = Utility.ScaleToMaxOf(img.Width, img.Height, GlobalConfiguration.DefaultEmojiHeight);
 
                         //Adjust to any specified scaling.
-                        Height = (int)(Height * (customScalePercent / 100.0));
-                        Width = (int)(Width * (customScalePercent / 100.0));
+                        Height = (int)(Height * (givenScale / 100.0));
+                        Width = (int)(Width * (givenScale / 100.0));
 
                         //Adjusting by a ratio (and especially after applying additional scaling) may have caused one
                         //  dimension to become very small (or even negative). So here we will check the height and width
@@ -471,7 +561,7 @@ namespace TightWiki.Controllers
                 }
             }
 
-            return NotFound(Localize("Emoji {0} was not found", pageNavigation));
+            return NotFound(Localize("Emoji {0} was not found", emojiNavigation));
         }
     }
 }

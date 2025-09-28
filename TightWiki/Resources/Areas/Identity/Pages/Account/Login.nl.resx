@@ -77,4 +77,46 @@
   <data name="Resend email confirmation" xml:space="preserve">
     <value>Stuur e-mailbevestiging opnieuw</value>
   </data>
+  <data name="- or -" xml:space="preserve">
+    <value>- of -</value>
+  </data>
+  <data name="Sign in with {0}" xml:space="preserve">
+    <value>Inloggen met {0}</value>
+  </data>
+  <data name="Username" xml:space="preserve">
+    <value>Gebruikersnaam</value>
+  </data>
+  <data name="Failed to create the stub account for the LDAP credential." xml:space="preserve">
+    <value>Het is niet gelukt om het stub-account voor de LDAP-credential te maken.</value>
+  </data>
+  <data name="Failed to locate the user account for the LDAP credential." xml:space="preserve">
+    <value>Het is niet gelukt om het gebruikersaccount voor de LDAP-credential te vinden.</value>
+  </data>
+  <data name="User created a new account with LDAP." xml:space="preserve">
+    <value>Gebruiker heeft een nieuw account aangemaakt met LDAP.</value>
+  </data>
+  <data name="Failed to create stub account for the LDAP credential: {0}." xml:space="preserve">
+    <value>Kon geen stub-account aanmaken voor de LDAP-inloggegevens: {0}.</value>
+  </data>
+  <data name="Invalid login attempt." xml:space="preserve">
+    <value>Ongeldige inlogpoging.</value>
+  </data>
+  <data name="Failed to add login info for LDAP stub account: {0}." xml:space="preserve">
+    <value>Kon geen inloginfo toevoegen voor het LDAP-stubaccount: {0}.</value>
+  </data>
+  <data name="Please enter both username and password." xml:space="preserve">
+    <value>Voer zowel gebruikersnaam als wachtwoord in.</value>
+  </data>
+  <data name="Request failed:" xml:space="preserve">
+    <value>Verzoek mislukt:</value>
+  </data>
+  <data name="Bind succeeded." xml:space="preserve">
+    <value>Binden geslaagd.</value>
+  </data>
+  <data name="Bind failed." xml:space="preserve">
+    <value>Binden mislukt.</value>
+  </data>
+  <data name="Unexpected error:" xml:space="preserve">
+    <value>Onverwachte fout:</value>
+  </data>
 </root>

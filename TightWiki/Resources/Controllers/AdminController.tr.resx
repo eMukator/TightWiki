@@ -59,6 +59,9 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
+  <data name="LDAP error: {0}." xml:space="preserve">
+    <value>LDAP hatası: {0}.</value>
+  </data>
   <data name="Account name is already in use." xml:space="preserve">
     <value>Hesap adı zaten kullanılıyor.</value>
   </data>
@@ -221,6 +224,12 @@
   <data name="The pages orphaned attachments have been purged." xml:space="preserve">
     <value>Sayfaların yetim ekleri temizlendi.</value>
   </data>
+  <data name="The specified emoji has been deleted." xml:space="preserve">
+    <value>Belirtilen emoji silindi.</value>
+  </data>
+  <data name="The specified menu item has been deleted." xml:space="preserve">
+    <value>Belirtilen menü öğesi silindi.</value>
+  </data>
   <data name="The specified page could not be found." xml:space="preserve">
     <value>Belirtilen sayfa bulunamadı.</value>
   </data>
@@ -253,5 +262,23 @@
   </data>
   <data name="{0} Delete" xml:space="preserve">
     <value>{0} Sil</value>
+  </data>
+  <data name="LDAP challenge failed." xml:space="preserve">
+    <value>LDAP zorluğu başarısız oldu.</value>
+  </data>
+  <data name="LDAP challenge succeeded (partially provisioned account)." xml:space="preserve">
+    <value>LDAP zorluğu başarıyla tamamlandı (kısmen sağlanan hesap).</value>
+  </data>
+  <data name="LDAP challenge succeeded (fully provisioned account)." xml:space="preserve">
+    <value>LDAP zorluğu başarıyla tamamlandı (tamamen sağlanan hesap).</value>
+  </data>
+  <data name="LDAP challenge succeeded, but the user does not have an objectGUID attribute." xml:space="preserve">
+    <value>LDAP zorluğu başarılı oldu, ancak kullanıcının bir objectGUID niteliği yok.</value>
+  </data>
+  <data name="LDAP authentication is not enabled." xml:space="preserve">
+    <value>LDAP kimlik doğrulaması etkin değil.</value>
+  </data>
+  <data name="LDAP challenge succeeded (un-provisioned account)." xml:space="preserve">
+    <value>LDAP zorluğu başarıyla tamamlandı (provision edilmemiş hesap).</value>
   </data>
 </root>

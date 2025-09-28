@@ -77,4 +77,46 @@
   <data name="Resend email confirmation" xml:space="preserve">
     <value>Reenviar confirmación de correo electrónico</value>
   </data>
+  <data name="- or -" xml:space="preserve">
+    <value>- o -</value>
+  </data>
+  <data name="Sign in with {0}" xml:space="preserve">
+    <value>Iniciar sesión con {0}</value>
+  </data>
+  <data name="Username" xml:space="preserve">
+    <value>Nombre de usuario</value>
+  </data>
+  <data name="Failed to create the stub account for the LDAP credential." xml:space="preserve">
+    <value>No se pudo crear la cuenta de prueba para la credencial LDAP.</value>
+  </data>
+  <data name="Failed to locate the user account for the LDAP credential." xml:space="preserve">
+    <value>No se pudo localizar la cuenta de usuario para la credencial LDAP.</value>
+  </data>
+  <data name="User created a new account with LDAP." xml:space="preserve">
+    <value>El usuario creó una nueva cuenta con LDAP.</value>
+  </data>
+  <data name="Failed to create stub account for the LDAP credential: {0}." xml:space="preserve">
+    <value>Falló al crear la cuenta provisional para la credencial LDAP: {0}.</value>
+  </data>
+  <data name="Invalid login attempt." xml:space="preserve">
+    <value>Intento de inicio de sesión inválido.</value>
+  </data>
+  <data name="Failed to add login info for LDAP stub account: {0}." xml:space="preserve">
+    <value>Falló al agregar información de inicio de sesión para la cuenta provisional LDAP: {0}.</value>
+  </data>
+  <data name="Please enter both username and password." xml:space="preserve">
+    <value>Por favor, ingrese tanto el nombre de usuario como la contraseña.</value>
+  </data>
+  <data name="Request failed:" xml:space="preserve">
+    <value>La solicitud falló:</value>
+  </data>
+  <data name="Bind succeeded." xml:space="preserve">
+    <value>La unión fue exitosa.</value>
+  </data>
+  <data name="Bind failed." xml:space="preserve">
+    <value>La unión falló.</value>
+  </data>
+  <data name="Unexpected error:" xml:space="preserve">
+    <value>Error inesperado:</value>
+  </data>
 </root>

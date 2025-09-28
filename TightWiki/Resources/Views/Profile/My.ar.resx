@@ -59,8 +59,8 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
-  <data name="Account Name" xml:space="preserve">
-    <value>اسم الحساب</value>
+  <data name="Display Name" xml:space="preserve">
+    <value>اسم العرض</value>
   </data>
   <data name="Avatar" xml:space="preserve">
     <value>أفاتار</value>
@@ -68,11 +68,17 @@
   <data name="Biography" xml:space="preserve">
     <value>السيرة الذاتية</value>
   </data>
+  <data name="Change Avatar" xml:space="preserve">
+    <value>تغيير الصورة الرمزية</value>
+  </data>
   <data name="Country" xml:space="preserve">
     <value>البلد</value>
   </data>
   <data name="Delete Account" xml:space="preserve">
     <value>حذف الحساب</value>
+  </data>
+  <data name="Deleting '{0}' will permanently remove the account. All pages created or modified by this user will be attributed to a stand-in account and you will not be able to revert this action. Continue?" xml:space="preserve">
+    <value>حذف '{0}' سيؤدي إلى إزالة الحساب بشكل دائم. جميع الصفحات التي تم إنشاؤها أو تعديلها بواسطة هذا المستخدم ستنسب إلى حساب بديل ولن تتمكن من التراجع عن هذا الإجراء. هل تريد الاستمرار؟</value>
   </data>
   <data name="Email Address" xml:space="preserve">
     <value>عنوان البريد الإلكتروني</value>

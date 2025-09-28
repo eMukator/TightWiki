@@ -77,4 +77,46 @@
   <data name="Resend email confirmation" xml:space="preserve">
     <value>E-posta onayını yeniden gönder</value>
   </data>
+  <data name="- or -" xml:space="preserve">
+    <value>- veya -</value>
+  </data>
+  <data name="Sign in with {0}" xml:space="preserve">
+    <value>{0} ile oturum aç</value>
+  </data>
+  <data name="Username" xml:space="preserve">
+    <value>Kullanıcı Adı</value>
+  </data>
+  <data name="Failed to create the stub account for the LDAP credential." xml:space="preserve">
+    <value>LDAP kimlik bilgisi için geçici hesabı oluşturma başarısız oldu.</value>
+  </data>
+  <data name="Failed to locate the user account for the LDAP credential." xml:space="preserve">
+    <value>LDAP kimlik bilgisi için kullanıcı hesabını bulma başarısız oldu.</value>
+  </data>
+  <data name="User created a new account with LDAP." xml:space="preserve">
+    <value>Kullanıcı LDAP ile yeni bir hesap oluşturdu.</value>
+  </data>
+  <data name="Failed to create stub account for the LDAP credential: {0}." xml:space="preserve">
+    <value>LDAP kimlik bilgisi için stub hesabı oluşturulamadı: {0}.</value>
+  </data>
+  <data name="Invalid login attempt." xml:space="preserve">
+    <value>Geçersiz giriş denemesi.</value>
+  </data>
+  <data name="Failed to add login info for LDAP stub account: {0}." xml:space="preserve">
+    <value>LDAP stub hesabı için giriş bilgileri eklenemedi: {0}.</value>
+  </data>
+  <data name="Please enter both username and password." xml:space="preserve">
+    <value>Lütfen hem kullanıcı adı hem de şifreyi girin.</value>
+  </data>
+  <data name="Request failed:" xml:space="preserve">
+    <value>İstek başarısız oldu:</value>
+  </data>
+  <data name="Bind succeeded." xml:space="preserve">
+    <value>Bağlantı başarılı.</value>
+  </data>
+  <data name="Bind failed." xml:space="preserve">
+    <value>Bağlantı başarısız.</value>
+  </data>
+  <data name="Unexpected error:" xml:space="preserve">
+    <value>Beklenmeyen hata:</value>
+  </data>
 </root>

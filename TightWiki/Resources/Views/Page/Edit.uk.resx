@@ -173,4 +173,16 @@
   <data name="Change Summary" xml:space="preserve">
     <value>Підсумок змін</value>
   </data>
+  <data name="Emoji" xml:space="preserve">
+    <value>Емодзі</value>
+  </data>
+  <data name="Insert Emoji" xml:space="preserve">
+    <value>Вставити емодзі</value>
+  </data>
+  <data name="Having trouble finding an emoji? View them all." xml:space="preserve">
+    <value>Маєте проблеми з пошуком емодзі? Перегляньте їх усі.</value>
+  </data>
+  <data name="Search for more emojis." xml:space="preserve">
+    <value>Шукайте більше емодзі.</value>
+  </data>
 </root>

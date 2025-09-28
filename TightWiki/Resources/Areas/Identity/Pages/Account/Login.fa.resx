@@ -77,4 +77,46 @@
   <data name="Resend email confirmation" xml:space="preserve">
     <value>تأییدیه ایمیل را دوباره ارسال کنید</value>
   </data>
+  <data name="- or -" xml:space="preserve">
+    <value>- یا -</value>
+  </data>
+  <data name="Sign in with {0}" xml:space="preserve">
+    <value>با {0} وارد شوید</value>
+  </data>
+  <data name="Username" xml:space="preserve">
+    <value>نام کاربری</value>
+  </data>
+  <data name="Failed to create the stub account for the LDAP credential." xml:space="preserve">
+    <value>ایجاد حساب موقت برای اعتبار LDAP شکست خورد.</value>
+  </data>
+  <data name="Failed to locate the user account for the LDAP credential." xml:space="preserve">
+    <value>عدم توانایی در پیدا کردن حساب کاربری برای اعتبار LDAP.</value>
+  </data>
+  <data name="User created a new account with LDAP." xml:space="preserve">
+    <value>کاربر یک حساب جدید با LDAP ایجاد کرد.</value>
+  </data>
+  <data name="Failed to create stub account for the LDAP credential: {0}." xml:space="preserve">
+    <value>ایجاد حساب موقتی برای اعتبار LDAP با شکست مواجه شد: {0}.</value>
+  </data>
+  <data name="Invalid login attempt." xml:space="preserve">
+    <value>تلاش برای ورود نامعتبر است.</value>
+  </data>
+  <data name="Failed to add login info for LDAP stub account: {0}." xml:space="preserve">
+    <value>اضافه کردن اطلاعات ورود برای حساب موقتی LDAP با شکست مواجه شد: {0}.</value>
+  </data>
+  <data name="Please enter both username and password." xml:space="preserve">
+    <value>لطفاً هم نام کاربری و هم رمز عبور را وارد کنید.</value>
+  </data>
+  <data name="Request failed:" xml:space="preserve">
+    <value>درخواست با شکست مواجه شد:</value>
+  </data>
+  <data name="Bind succeeded." xml:space="preserve">
+    <value>اتصال موفقیت‌آمیز بود.</value>
+  </data>
+  <data name="Bind failed." xml:space="preserve">
+    <value>اتصال با شکست مواجه شد.</value>
+  </data>
+  <data name="Unexpected error:" xml:space="preserve">
+    <value>خطای غیرمنتظره:</value>
+  </data>
 </root>

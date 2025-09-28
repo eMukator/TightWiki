@@ -77,4 +77,46 @@
   <data name="Resend email confirmation" xml:space="preserve">
     <value>ईमेल पुष्टिकरण पुनः भेजें</value>
   </data>
+  <data name="- or -" xml:space="preserve">
+    <value>- या -</value>
+  </data>
+  <data name="Sign in with {0}" xml:space="preserve">
+    <value>साइन इन करें {0} के साथ</value>
+  </data>
+  <data name="Username" xml:space="preserve">
+    <value>उपयोगकर्ता नाम</value>
+  </data>
+  <data name="Failed to create the stub account for the LDAP credential." xml:space="preserve">
+    <value>LDAP क्रेडेंशियल के लिए स्टब खाता बनाने में विफल.</value>
+  </data>
+  <data name="Failed to locate the user account for the LDAP credential." xml:space="preserve">
+    <value>LDAP क्रेडेंशियल के लिए उपयोगकर्ता खाते को ढूंढने में विफल.</value>
+  </data>
+  <data name="User created a new account with LDAP." xml:space="preserve">
+    <value>उपयोगकर्ता ने LDAP के साथ एक नया खाता बनाया।</value>
+  </data>
+  <data name="Failed to create stub account for the LDAP credential: {0}." xml:space="preserve">
+    <value>LDAP क्रेडेंशियल के लिए स्टब खाता बनाने में विफल: {0}।</value>
+  </data>
+  <data name="Invalid login attempt." xml:space="preserve">
+    <value>अमान्य लॉगिन प्रयास।</value>
+  </data>
+  <data name="Failed to add login info for LDAP stub account: {0}." xml:space="preserve">
+    <value>LDAP स्टब खाता के लिए लॉगिन जानकारी जोड़ने में विफल: {0}।</value>
+  </data>
+  <data name="Please enter both username and password." xml:space="preserve">
+    <value>कृपया उपयोगकर्ता नाम और पासवर्ड दोनों दर्ज करें।</value>
+  </data>
+  <data name="Request failed:" xml:space="preserve">
+    <value>अनुरोध विफल:</value>
+  </data>
+  <data name="Bind succeeded." xml:space="preserve">
+    <value>बाइंड सफल रहा।</value>
+  </data>
+  <data name="Bind failed." xml:space="preserve">
+    <value>बाइंड विफल रहा।</value>
+  </data>
+  <data name="Unexpected error:" xml:space="preserve">
+    <value>अचानक त्रुटि:</value>
+  </data>
 </root>

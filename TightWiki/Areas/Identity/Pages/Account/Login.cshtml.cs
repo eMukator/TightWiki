@@ -5,39 +5,27 @@
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Localization;
 using System.ComponentModel.DataAnnotations;
 using System.Net;
+using TightWiki.Extensions;
+using TightWiki.Library;
 using TightWiki.Models;
+using TightWiki.Repository;
+using TightWiki.Security;
+using TightWiki.Static;
 
 namespace TightWiki.Areas.Identity.Pages.Account
 {
-
-    /// <summary>
-    ///     This API supports the ASP.NET Core Identity default UI infrastructure and is not intended to be used
-    ///     directly from your code. This API may change or be removed in future releases.
-    /// </summary>
     public class LoginInputModel
     {
-        /// <summary>
-        ///     This API supports the ASP.NET Core Identity default UI infrastructure and is not intended to be used
-        ///     directly from your code. This API may change or be removed in future releases.
-        /// </summary>
         [Required(ErrorMessageResourceName = "RequiredAttribute_ValidationError", ErrorMessageResourceType = typeof(Models.Resources.ValTexts))]
-        [EmailAddress(ErrorMessageResourceName = "EmailAddressAttribute_Invalid", ErrorMessageResourceType = typeof(Models.Resources.ValTexts))]
-        public string Email { get; set; }
+        public string Username { get; set; }
 
-        /// <summary>
-        ///     This API supports the ASP.NET Core Identity default UI infrastructure and is not intended to be used
-        ///     directly from your code. This API may change or be removed in future releases.
-        /// </summary>
         [Required(ErrorMessageResourceName = "RequiredAttribute_ValidationError", ErrorMessageResourceType = typeof(Models.Resources.ValTexts))]
         [DataType(DataType.Password, ErrorMessageResourceName = "DataTypeAttribute_EmptyDataTypeString", ErrorMessageResourceType = typeof(Models.Resources.ValTexts))]
         public string Password { get; set; }
 
-        /// <summary>
-        ///     This API supports the ASP.NET Core Identity default UI infrastructure and is not intended to be used
-        ///     directly from your code. This API may change or be removed in future releases.
-        /// </summary>
         [Display(Name = "Remember me?")]
         public bool RememberMe { get; set; }
     }
@@ -45,79 +33,170 @@ namespace TightWiki.Areas.Identity.Pages.Account
     public class LoginModel : PageModelBase
     {
         private readonly SignInManager<IdentityUser> _signInManager;
+        private readonly UserManager<IdentityUser> _userManager;
         private readonly ILogger<LoginModel> _logger;
+        private readonly IStringLocalizer<ConfirmEmailModel> _localizer;
 
-        public LoginModel(SignInManager<IdentityUser> signInManager, ILogger<LoginModel> logger)
+        public LoginModel(ILogger<LoginModel> logger, SignInManager<IdentityUser> signInManager, UserManager<IdentityUser> userManager, IStringLocalizer<ConfirmEmailModel> localizer)
                         : base(signInManager)
         {
+            _localizer = localizer;
             _signInManager = signInManager;
+            _userManager = userManager;
             _logger = logger;
         }
 
-        /// <summary>
-        ///     This API supports the ASP.NET Core Identity default UI infrastructure and is not intended to be used
-        ///     directly from your code. This API may change or be removed in future releases.
-        /// </summary>
         [BindProperty]
         public LoginInputModel Input { get; set; }
 
-        /// <summary>
-        ///     This API supports the ASP.NET Core Identity default UI infrastructure and is not intended to be used
-        ///     directly from your code. This API may change or be removed in future releases.
-        /// </summary>
         public IList<AuthenticationScheme> ExternalLogins { get; set; }
 
-        /// <summary>
-        ///     This API supports the ASP.NET Core Identity default UI infrastructure and is not intended to be used
-        ///     directly from your code. This API may change or be removed in future releases.
-        /// </summary>
         public string ReturnUrl { get; set; }
 
         public async Task OnGetAsync(string returnUrl = null)
         {
-            ReturnUrl = WebUtility.UrlDecode(returnUrl ?? $"{GlobalConfiguration.BasePath}/");
-
-            if (!string.IsNullOrEmpty(ErrorMessage))
+            try
             {
-                ModelState.AddModelError(string.Empty, ErrorMessage);
+                ReturnUrl = WebUtility.UrlDecode(returnUrl ?? $"{GlobalConfiguration.BasePath}/");
+
+                if (!string.IsNullOrEmpty(ErrorMessage))
+                {
+                    ModelState.AddModelError(string.Empty, ErrorMessage);
+                }
+
+                // Clear the existing external cookie to ensure a clean login process
+                await HttpContext.SignOutAsync(IdentityConstants.ExternalScheme);
+
+                ExternalLogins = (await _signInManager.GetExternalAuthenticationSchemesAsync()).ToList();
             }
-
-            // Clear the existing external cookie to ensure a clean login process
-            await HttpContext.SignOutAsync(IdentityConstants.ExternalScheme);
-
-            ExternalLogins = (await _signInManager.GetExternalAuthenticationSchemesAsync()).ToList();
+            catch (Exception ex)
+            {
+                _logger.LogError("Exception: {Message}", ex.Message);
+                ExceptionRepository.InsertException(ex, "LDAP authentication error");
+            }
         }
 
         public async Task<IActionResult> OnPostAsync(string returnUrl = null)
         {
-            ReturnUrl = WebUtility.UrlDecode(returnUrl ?? $"{GlobalConfiguration.BasePath}/");
-
-            ExternalLogins = (await _signInManager.GetExternalAuthenticationSchemesAsync()).ToList();
-
-            if (ModelState.IsValid)
+            try
             {
-                // This doesn't count login failures towards account lockout
-                // To enable password failures to trigger account lockout, set lockoutOnFailure: true
-                var result = await _signInManager.PasswordSignInAsync(Input.Email, Input.Password, Input.RememberMe, lockoutOnFailure: false);
-                if (result.Succeeded)
+                var ldapAuthenticationConfiguration = ConfigurationRepository.GetConfigurationEntryValuesByGroupName(Constants.ConfigurationGroup.LDAPAuthentication);
+
+                ReturnUrl = WebUtility.UrlDecode(returnUrl ?? $"{GlobalConfiguration.BasePath}/");
+
+                ExternalLogins = (await _signInManager.GetExternalAuthenticationSchemesAsync()).ToList();
+
+                if (ModelState.IsValid)
                 {
-                    _logger.LogInformation("User logged in.");
-                    return Redirect(ReturnUrl);
+                    // This doesn't count login failures towards account lockout
+                    // To enable password failures to trigger account lockout, set lockoutOnFailure: true
+                    var result = await _signInManager.PasswordSignInAsync(Input.Username, Input.Password, Input.RememberMe, lockoutOnFailure: false);
+                    if (result.Succeeded)
+                    {
+                        _logger.LogInformation("User logged in.");
+                        return Redirect(ReturnUrl);
+                    }
+                    if (result.RequiresTwoFactor)
+                    {
+                        return Redirect($"{GlobalConfiguration.BasePath}/Identity/Account/LoginWith2fa?ReturnUrl={WebUtility.UrlEncode(ReturnUrl)}&RememberMe={Input.RememberMe}");
+                    }
+                    if (result.IsLockedOut)
+                    {
+                        _logger.LogWarning("User account locked out.");
+                        return Redirect($"{GlobalConfiguration.BasePath}/Identity/Account/Lockout");
+                    }
+                    else
+                    {
+                        #region Fallback to LDAP authentication if enabled.
+
+                        if (GlobalConfiguration.EnableLDAPAuthentication)
+                        {
+                            if (LDAPUtility.LdapCredentialChallenge(ldapAuthenticationConfiguration, StaticLocalizer.Localizer,
+                                Input.Username, Input.Password, out var samAccountName, out var objectGuid))
+                            {
+                                //We successfully authenticated against LDAP.
+
+                                var loginInfo = new UserLoginInfo("LDAP", objectGuid.ToString(), "Active Directory");
+
+                                var foundUser = await _userManager.FindByLoginAsync(loginInfo.LoginProvider, loginInfo.ProviderKey);
+
+                                if (foundUser != null && UsersRepository.TryGetBasicProfileByUserId(Guid.Parse(foundUser.Id), out _))
+                                {
+                                    await SignInManager.SignInAsync(foundUser, Input.RememberMe);
+                                    return Redirect(returnUrl);
+                                }
+                                else
+                                {
+                                    if (GlobalConfiguration.AllowSignup != true)
+                                    {
+                                        return Redirect($"{GlobalConfiguration.BasePath}/Identity/Account/RegistrationIsNotAllowed");
+                                    }
+
+                                    var newUser = new IdentityUser()
+                                    {
+                                        UserName = samAccountName
+                                    };
+
+                                    //If the user does not already exist, create them:
+                                    if (foundUser == null)
+                                    {
+                                        var createResult = await _userManager.CreateAsync(newUser);
+
+                                        if (createResult.Succeeded)
+                                        {
+                                            _logger.LogInformation(_localizer["User created a new account with LDAP."]);
+
+                                            // Link the stable AD identity to this user
+                                            var addLogin = await _userManager.AddLoginAsync(newUser, loginInfo);
+                                            if (!addLogin.Succeeded)
+                                            {
+                                                throw new Exception(_localizer["Failed to add login info for LDAP stub account: {0}."]
+                                                    .Format(string.Join("; ", addLogin.Errors.Select(e => $"{e.Code}:{e.Description}"))));
+                                            }
+
+                                            foundUser = await _userManager.FindByNameAsync(samAccountName);
+                                            if (foundUser == null)
+                                            {
+                                                throw new Exception(_localizer["Failed to locate the user account for the LDAP credential."]);
+                                            }
+
+                                        }
+                                        else
+                                        {
+                                            throw new Exception(_localizer["Failed to create stub account for the LDAP credential: {0}."]
+                                                .Format(string.Join("; ", createResult.Errors.Select(e => $"{e.Code}:{e.Description}"))));
+                                        }
+                                    }
+
+                                    // Check if the user has a profile, if not, redirect to the supplemental info page.
+                                    if (UsersRepository.TryGetBasicProfileByUserId(Guid.Parse(foundUser.Id), out _) == false)
+                                    {
+                                        if (GlobalConfiguration.AllowSignup != true)
+                                        {
+                                            return Redirect($"{GlobalConfiguration.BasePath}/Identity/Account/RegistrationIsNotAllowed");
+                                        }
+
+                                        //User exits but does not have a profile.
+                                        //This means that the user has authenticated with LDSP, but has yet to complete the signup process.
+                                        return RedirectToPage($"{GlobalConfiguration.BasePath}/Account/LdapLoginSupplemental", new { UserId = foundUser.Id, ReturnUrl = returnUrl });
+                                    }
+                                }
+
+                                return Redirect(returnUrl);
+                            }
+                        }
+
+                        #endregion
+
+                        ModelState.AddModelError(string.Empty, _localizer["Invalid login attempt."]);
+                        return Page();
+                    }
                 }
-                if (result.RequiresTwoFactor)
-                {
-                    return Redirect($"{GlobalConfiguration.BasePath}/Identity/Account/LoginWith2fa?ReturnUrl={WebUtility.UrlEncode(ReturnUrl)}&RememberMe={Input.RememberMe}");
-                }
-                if (result.IsLockedOut)
-                {
-                    _logger.LogWarning("User account locked out.");
-                    return Redirect($"{GlobalConfiguration.BasePath}/Identity/Account/Lockout");
-                }
-                else
-                {
-                    ModelState.AddModelError(string.Empty, "Invalid login attempt.");
-                    return Page();
-                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError("Exception: {Message}", ex.Message);
+                ExceptionRepository.InsertException(ex);
             }
 
             // If we got this far, something failed, redisplay form

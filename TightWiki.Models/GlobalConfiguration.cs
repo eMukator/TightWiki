@@ -10,8 +10,14 @@ namespace TightWiki.Models
         public static Theme SystemTheme { get; set; } = new();
         public static bool IsDebug { get; set; }
         public static bool AllowSignup { get; set; }
+        public static bool EnableLDAPAuthentication { get; set; }
+
         public static List<Emoji> Emojis { get; set; } = new();
         public static string BrandImageSmall { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Name of the site.
+        /// </summary>
         public static string Name { get; set; } = string.Empty;
         public static string FooterBlurb { get; set; } = string.Empty;
         public static string Copyright { get; set; } = string.Empty;
@@ -39,7 +45,6 @@ namespace TightWiki.Models
         public static string DefaultTimeZone { get; set; } = string.Empty;
         public static string Address { get; set; } = string.Empty;
         public static int DefaultEmojiHeight { get; set; }
-        public static bool AllowGoogleAuthentication { get; set; }
         public static int MaxAvatarFileSize { get; set; } = 1048576;
         public static int MaxAttachmentFileSize { get; set; } = 5242880;
         public static int MaxEmojiFileSize { get; set; } = 524288;

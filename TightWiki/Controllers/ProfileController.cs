@@ -13,6 +13,7 @@ using TightWiki.Library;
 using TightWiki.Models;
 using TightWiki.Models.DataModels;
 using TightWiki.Models.ViewModels.Profile;
+using TightWiki.Models.ViewModels.Utility;
 using TightWiki.Repository;
 using static TightWiki.Library.Images;
 
@@ -39,7 +40,8 @@ namespace TightWiki.Controllers
         [HttpGet("{userAccountName}/Avatar")]
         public ActionResult Avatar(string userAccountName)
         {
-            SessionState.RequireViewPermission();
+            //TODO: Do we need to check permissions here?
+            //SessionState.RequireViewPermission();
             SessionState.Page.Name = Localize("Avatar");
 
             string givenScale = Request.Query["Scale"].ToString().ToString().DefaultWhenNullOrEmpty("100");
@@ -49,7 +51,8 @@ namespace TightWiki.Controllers
             ProfileAvatar? avatar;
             if (GlobalConfiguration.EnablePublicProfiles)
             {
-                avatar = UsersRepository.GetProfileAvatarByNavigation(NamespaceNavigation.CleanAndValidate(userAccountName));
+                avatar = UsersRepository.GetProfileAvatarByNavigation(NamespaceNavigation.CleanAndValidate(userAccountName))
+                    ?? new ProfileAvatar();
             }
             else
             {
@@ -242,7 +245,14 @@ namespace TightWiki.Controllers
         [HttpGet("My")]
         public ActionResult My()
         {
-            SessionState.RequireAuthorizedPermission();
+            try
+            {
+                SessionState.RequireAuthorizedPermission();
+            }
+            catch (Exception ex)
+            {
+                return NotifyOfError(ex.GetBaseException().Message, "/");
+            }
             SessionState.Page.Name = Localize("My Profile");
 
             var model = new AccountProfileViewModel()
@@ -269,8 +279,14 @@ namespace TightWiki.Controllers
         [HttpPost("My")]
         public ActionResult My(AccountProfileViewModel model)
         {
-            SessionState.RequireAuthorizedPermission();
-
+            try
+            {
+                SessionState.RequireAuthorizedPermission();
+            }
+            catch (Exception ex)
+            {
+                return NotifyOfError(ex.GetBaseException().Message, "/");
+            }
             SessionState.Page.Name = Localize("My Profile");
 
             model.TimeZones = TimeZoneItem.GetAll();
@@ -316,8 +332,8 @@ namespace TightWiki.Controllers
                     try
                     {
                         var imageBytes = Utility.ConvertHttpFileToBytes(file);
-                        var image = Image.Load(new MemoryStream(imageBytes));
-                        UsersRepository.UpdateProfileAvatar(profile.UserId, imageBytes, file.ContentType.ToLowerInvariant());
+                        var image = Utility.CropImageToCenteredSquare(new MemoryStream(imageBytes));
+                        UsersRepository.UpdateProfileAvatar(profile.UserId, image, "image/webp");
                     }
                     catch
                     {
@@ -364,14 +380,19 @@ namespace TightWiki.Controllers
         /// </summary>
         [Authorize]
         [HttpPost("Delete")]
-        public ActionResult Delete(DeleteAccountViewModel model)
+        public ActionResult DeleteAccount(ConfirmActionViewModel model)
         {
-            SessionState.RequireAuthorizedPermission();
-
+            try
+            {
+                SessionState.RequireAuthorizedPermission();
+            }
+            catch (Exception ex)
+            {
+                return NotifyOfError(ex.GetBaseException().Message, "/");
+            }
             var profile = UsersRepository.GetBasicProfileByUserId(SessionState.Profile.EnsureNotNull().UserId);
 
-            bool confirmAction = bool.Parse(GetFormValue("IsActionConfirmed").EnsureNotNull());
-            if (confirmAction == true && profile != null)
+            if (model.UserSelection == true && profile != null)
             {
                 var user = UserManager.FindByIdAsync(profile.UserId.ToString()).Result;
                 if (user == null)
@@ -391,35 +412,10 @@ namespace TightWiki.Controllers
                 WikiCache.ClearCategory(WikiCacheKey.Build(WikiCache.Category.User, [profile.Navigation]));
 
                 HttpContext.SignOutAsync(); //Do we still need this??
-                return Redirect($"{GlobalConfiguration.BasePath}/Profile/Deleted");
+                return NotifyOfSuccess(Localize("Your account has been deleted."), $"/Profile/Deleted");
             }
 
-            return Redirect($"{GlobalConfiguration.BasePath}/Profile/My");
-        }
-
-        /// <summary>
-        /// User is deleting their own profile.
-        /// </summary>
-        [Authorize]
-        [HttpGet("Delete")]
-        public ActionResult Delete()
-        {
-            SessionState.RequireAuthorizedPermission();
-            SessionState.Page.Name = Localize("Delete Account");
-
-            var profile = UsersRepository.GetBasicProfileByUserId(SessionState.Profile.EnsureNotNull().UserId);
-
-            var model = new DeleteAccountViewModel()
-            {
-                AccountName = profile.AccountName
-            };
-
-            if (profile != null)
-            {
-                SessionState.Page.Name = Localize("Delete {0}", profile.AccountName);
-            }
-
-            return View(model);
+            return Redirect($"{GlobalConfiguration.BasePath}{model.NoRedirectURL}");
         }
 
         /// <summary>

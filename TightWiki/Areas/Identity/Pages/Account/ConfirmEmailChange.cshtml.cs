@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.Localization;
 using System.Text;
 using TightWiki.Models;
+using TightWiki.Repository;
 
 namespace TightWiki.Areas.Identity.Pages.Account
 {
@@ -16,13 +17,15 @@ namespace TightWiki.Areas.Identity.Pages.Account
         private readonly UserManager<IdentityUser> _userManager;
         private readonly SignInManager<IdentityUser> _signInManager;
         private readonly IStringLocalizer<ConfirmEmailChangeModel> _localizer;
-
-        public ConfirmEmailChangeModel
-            (UserManager<IdentityUser> userManager,
+        private readonly ILogger<ConfirmEmailChangeModel> _logger;
+        public ConfirmEmailChangeModel(
+            ILogger<ConfirmEmailChangeModel> logger,
+            UserManager<IdentityUser> userManager,
             SignInManager<IdentityUser> signInManager,
             IStringLocalizer<ConfirmEmailChangeModel> localizer)
             : base(signInManager)
         {
+            _logger = logger;
             _userManager = userManager;
             _signInManager = signInManager;
             _localizer = localizer;
@@ -37,36 +40,45 @@ namespace TightWiki.Areas.Identity.Pages.Account
 
         public async Task<IActionResult> OnGetAsync(string userId, string email, string code)
         {
-            if (userId == null || email == null || code == null)
+            try
             {
-                return Redirect($"{GlobalConfiguration.BasePath}/");
-            }
+                if (userId == null || email == null || code == null)
+                {
+                    return Redirect($"{GlobalConfiguration.BasePath}/");
+                }
 
-            var user = await _userManager.FindByIdAsync(userId);
-            if (user == null)
+                var user = await _userManager.FindByIdAsync(userId);
+                if (user == null)
+                {
+                    return NotFound($"Unable to load user with ID '{userId}'.");
+                }
+
+                code = Encoding.UTF8.GetString(WebEncoders.Base64UrlDecode(code));
+                var result = await _userManager.ChangeEmailAsync(user, email, code);
+                if (!result.Succeeded)
+                {
+                    StatusMessage = _localizer["Error changing email."];
+                    return Page();
+                }
+
+                // In our UI email and user name are one and the same, so when we update the email
+                // we need to update the user name.
+                var setUserNameResult = await _userManager.SetUserNameAsync(user, email);
+                if (!setUserNameResult.Succeeded)
+                {
+                    StatusMessage = _localizer["Error changing user name."];
+                    return Page();
+                }
+
+                await _signInManager.RefreshSignInAsync(user);
+                StatusMessage = _localizer["Thank you for confirming your email change."];
+
+            }
+            catch (Exception ex)
             {
-                return NotFound($"Unable to load user with ID '{userId}'.");
+                _logger.LogError("Exception: {Message}", ex.Message);
+                ExceptionRepository.InsertException(ex);
             }
-
-            code = Encoding.UTF8.GetString(WebEncoders.Base64UrlDecode(code));
-            var result = await _userManager.ChangeEmailAsync(user, email, code);
-            if (!result.Succeeded)
-            {
-                StatusMessage = _localizer["Error changing email."];
-                return Page();
-            }
-
-            // In our UI email and user name are one and the same, so when we update the email
-            // we need to update the user name.
-            var setUserNameResult = await _userManager.SetUserNameAsync(user, email);
-            if (!setUserNameResult.Succeeded)
-            {
-                StatusMessage = _localizer["Error changing user name."];
-                return Page();
-            }
-
-            await _signInManager.RefreshSignInAsync(user);
-            StatusMessage = _localizer["Thank you for confirming your email change."];
             return Page();
         }
     }

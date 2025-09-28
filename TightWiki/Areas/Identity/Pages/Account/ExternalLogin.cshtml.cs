@@ -78,8 +78,7 @@ namespace TightWiki.Areas.Identity.Pages.Account
             ///     directly from your code. This API may change or be removed in future releases.
             /// </summary>
             [Required(ErrorMessageResourceName = "RequiredAttribute_ValidationError", ErrorMessageResourceType = typeof(Models.Resources.ValTexts))]
-            [EmailAddress(ErrorMessageResourceName = "EmailAddressAttribute_Invalid", ErrorMessageResourceType = typeof(Models.Resources.ValTexts))]
-            public string Email { get; set; }
+            public string Username { get; set; }
         }
 
         public IActionResult OnGet()
@@ -89,131 +88,160 @@ namespace TightWiki.Areas.Identity.Pages.Account
 
         public IActionResult OnPost(string provider, string returnUrl = null)
         {
-            ReturnUrl = WebUtility.UrlDecode(returnUrl ?? $"{GlobalConfiguration.BasePath}/");
+            try
+            {
+                ReturnUrl = WebUtility.UrlDecode(returnUrl ?? $"{GlobalConfiguration.BasePath}/");
 
-            // Request a redirect to the external login provider.
-            var redirectUrl = Url.Page("./ExternalLogin", pageHandler: "Callback", values: new { ReturnUrl });
-            var properties = _signInManager.ConfigureExternalAuthenticationProperties(provider, redirectUrl);
-            return new ChallengeResult(provider, properties);
+                // Request a redirect to the external login provider.
+                var redirectUrl = Url.Page("./ExternalLogin", pageHandler: "Callback", values: new { ReturnUrl });
+                var properties = _signInManager.ConfigureExternalAuthenticationProperties(provider, redirectUrl);
+                return new ChallengeResult(provider, properties);
+
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError("Exception: {Message}", ex.Message);
+                ExceptionRepository.InsertException(ex);
+            }
+            return Page();
         }
 
         public async Task<IActionResult> OnGetCallbackAsync(string returnUrl = null, string remoteError = null)
         {
-            ReturnUrl = WebUtility.UrlDecode(returnUrl ?? $"{GlobalConfiguration.BasePath}/");
+            try
+            {
+                ReturnUrl = WebUtility.UrlDecode(returnUrl ?? $"{GlobalConfiguration.BasePath}/");
 
-            if (remoteError != null)
-            {
-                ErrorMessage = String.Format(_localizer["Error from external provider: {0}"], remoteError);
-                return Redirect($"{GlobalConfiguration.BasePath}/Identity/Account/Login?ReturnUrl={WebUtility.UrlEncode(ReturnUrl)}");
-            }
-            var info = await _signInManager.GetExternalLoginInfoAsync();
-            if (info == null)
-            {
-                ErrorMessage = _localizer["Error loading external login information."];
-                return Redirect($"{GlobalConfiguration.BasePath}/Identity/Account/Login?ReturnUrl={WebUtility.UrlEncode(ReturnUrl)}");
-            }
-
-            // Sign in the user with this external login provider if the user already has a login.
-            var result = await _signInManager.ExternalLoginSignInAsync(info.LoginProvider, info.ProviderKey, isPersistent: false, bypassTwoFactor: true);
-            if (result.Succeeded)
-            {
-                _logger.LogInformation("{Name} logged in with {LoginProvider} provider.", info.Principal.Identity.Name, info.LoginProvider);
-                return Redirect(ReturnUrl);
-            }
-            if (result.IsLockedOut)
-            {
-                return Redirect($"{GlobalConfiguration.BasePath}/Identity/Account/Lockout");
-            }
-            else
-            {
-                // If the user does not have an account, then ask the user to create an account.
-                ProviderDisplayName = info.ProviderDisplayName;
-                if (info.Principal.HasClaim(c => c.Type == ClaimTypes.Email))
+                if (remoteError != null)
                 {
-                    Input = new InputModel
-                    {
-                        Email = info.Principal.FindFirstValue(ClaimTypes.Email)
-                    };
+                    ErrorMessage = String.Format(_localizer["Error from external provider: {0}"], remoteError);
+                    return Redirect($"{GlobalConfiguration.BasePath}/Identity/Account/Login?ReturnUrl={WebUtility.UrlEncode(ReturnUrl)}");
                 }
-                return Page();
+                var info = await _signInManager.GetExternalLoginInfoAsync();
+                if (info == null)
+                {
+                    ErrorMessage = _localizer["Error loading external login information."];
+                    return Redirect($"{GlobalConfiguration.BasePath}/Identity/Account/Login?ReturnUrl={WebUtility.UrlEncode(ReturnUrl)}");
+                }
+
+                // Sign in the user with this external login provider if the user already has a login.
+                var result = await _signInManager.ExternalLoginSignInAsync(info.LoginProvider, info.ProviderKey, isPersistent: false, bypassTwoFactor: true);
+                if (result.Succeeded)
+                {
+                    _logger.LogInformation("{Name} logged in with {LoginProvider} provider.", info.Principal.Identity.Name, info.LoginProvider);
+                    return Redirect(ReturnUrl);
+                }
+                if (result.IsLockedOut)
+                {
+                    return Redirect($"{GlobalConfiguration.BasePath}/Identity/Account/Lockout");
+                }
+                else
+                {
+                    // If the user does not have an account, then ask the user to create an account.
+                    ProviderDisplayName = info.ProviderDisplayName;
+                    if (info.Principal.HasClaim(c => c.Type == ClaimTypes.Email))
+                    {
+                        Input = new InputModel
+                        {
+                            Username = info.Principal.FindFirstValue(ClaimTypes.Email)
+                        };
+                    }
+                    return Page();
+                }
+
             }
+            catch (Exception ex)
+            {
+                _logger.LogError("Exception: {Message}", ex.Message);
+                ExceptionRepository.InsertException(ex);
+            }
+            return Page();
         }
 
         public async Task<IActionResult> OnPostConfirmationAsync(string returnUrl = null)
         {
-            ReturnUrl = WebUtility.UrlDecode(returnUrl ?? $"{GlobalConfiguration.BasePath}/");
-
-            // Get the information about the user from the external login provider
-            var info = await _signInManager.GetExternalLoginInfoAsync();
-            if (info == null)
+            try
             {
-                ErrorMessage = _localizer["Error loading external login information during confirmation."];
-                return Redirect($"{GlobalConfiguration.BasePath}/Identity/Account/Login?ReturnUrl={WebUtility.UrlEncode(ReturnUrl)}");
-            }
+                ReturnUrl = WebUtility.UrlDecode(returnUrl ?? $"{GlobalConfiguration.BasePath}/");
 
-            if (ModelState.IsValid)
-            {
-                var user = CreateUser();
-
-                await _userStore.SetUserNameAsync(user, Input.Email, CancellationToken.None);
-                await _emailStore.SetEmailAsync(user, Input.Email, CancellationToken.None);
-
-                var result = await _userManager.CreateAsync(user);
-                if (result.Succeeded == false)
+                // Get the information about the user from the external login provider
+                var info = await _signInManager.GetExternalLoginInfoAsync();
+                if (info == null)
                 {
-                    result = await _userManager.AddLoginAsync(user, info);
-                    if (result.Succeeded)
+                    ErrorMessage = _localizer["Error loading external login information during confirmation."];
+                    return Redirect($"{GlobalConfiguration.BasePath}/Identity/Account/Login?ReturnUrl={WebUtility.UrlEncode(ReturnUrl)}");
+                }
+
+                if (ModelState.IsValid)
+                {
+                    var user = CreateUser();
+
+                    await _userStore.SetUserNameAsync(user, Input.Username, CancellationToken.None);
+                    await _emailStore.SetEmailAsync(user, Input.Username, CancellationToken.None);
+
+                    var result = await _userManager.CreateAsync(user);
+                    if (result.Succeeded == false)
                     {
-                        _logger.LogInformation("User created an account using {Name} provider.", info.LoginProvider);
-
-                        var userId = await _userManager.GetUserIdAsync(user);
-                        var code = await _userManager.GenerateEmailConfirmationTokenAsync(user);
-                        var encodedCode = WebEncoders.Base64UrlEncode(Encoding.UTF8.GetBytes(code));
-                        var callbackUrl = Url.Page(
-                            "/Account/ConfirmEmail",
-                            pageHandler: null,
-                            values: new { area = "Identity", userId = userId, code = encodedCode },
-                            protocol: Request.Scheme);
-
-                        var emailTemplate = new StringBuilder(ConfigurationRepository.Get<string>(Constants.ConfigurationGroup.Membership, "Template: Account Verification Email"));
-                        var basicConfig = ConfigurationRepository.GetConfigurationEntryValuesByGroupName(Constants.ConfigurationGroup.Basic);
-                        var siteName = basicConfig.Value<string>("Name");
-                        var address = basicConfig.Value<string>("Address");
-                        var profile = UsersRepository.GetAccountProfileByUserId(Guid.Parse(userId));
-
-                        var emailSubject = "Confirm your email";
-                        emailTemplate.Replace("##SUBJECT##", emailSubject);
-                        emailTemplate.Replace("##ACCOUNTCOUNTRY##", profile.Country);
-                        emailTemplate.Replace("##ACCOUNTTIMEZONE##", profile.TimeZone);
-                        emailTemplate.Replace("##ACCOUNTLANGUAGE##", profile.Language);
-                        emailTemplate.Replace("##ACCOUNTEMAIL##", profile.EmailAddress);
-                        emailTemplate.Replace("##ACCOUNTNAME##", profile.AccountName);
-                        emailTemplate.Replace("##PERSONNAME##", $"{profile.FirstName} {profile.LastName}");
-                        emailTemplate.Replace("##CODE##", code);
-                        emailTemplate.Replace("##USERID##", userId);
-                        emailTemplate.Replace("##SITENAME##", siteName);
-                        emailTemplate.Replace("##SITEADDRESS##", address);
-                        emailTemplate.Replace("##CALLBACKURL##", HtmlEncoder.Default.Encode(callbackUrl));
-
-                        await _emailSender.SendEmailAsync(Input.Email, emailSubject, emailTemplate.ToString());
-
-                        // If account confirmation is required, we need to show the link if we don't have a real email sender
-                        if (_userManager.Options.SignIn.RequireConfirmedAccount)
+                        result = await _userManager.AddLoginAsync(user, info);
+                        if (result.Succeeded)
                         {
-                            return Redirect($"{GlobalConfiguration.BasePath}/Identity/Account/RegisterConfirmation?Email={Input.Email}");
-                        }
+                            _logger.LogInformation("User created an account using {Name} provider.", info.LoginProvider);
 
-                        await _signInManager.SignInAsync(user, isPersistent: false, info.LoginProvider);
-                        return Redirect(ReturnUrl);
+                            var userId = await _userManager.GetUserIdAsync(user);
+                            var code = await _userManager.GenerateEmailConfirmationTokenAsync(user);
+                            var encodedCode = WebEncoders.Base64UrlEncode(Encoding.UTF8.GetBytes(code));
+                            var callbackUrl = Url.Page(
+                                "/Account/ConfirmEmail",
+                                pageHandler: null,
+                                values: new { area = "Identity", userId = userId, code = encodedCode },
+                                protocol: Request.Scheme);
+
+                            var emailTemplate = new StringBuilder(ConfigurationRepository.Get<string>(Constants.ConfigurationGroup.Membership, "Template: Account Verification Email"));
+                            var basicConfig = ConfigurationRepository.GetConfigurationEntryValuesByGroupName(Constants.ConfigurationGroup.Basic);
+                            var siteName = basicConfig.Value<string>("Name");
+                            var address = basicConfig.Value<string>("Address");
+                            var profile = UsersRepository.GetAccountProfileByUserId(Guid.Parse(userId));
+
+                            var emailSubject = "Confirm your email";
+                            emailTemplate.Replace("##SUBJECT##", emailSubject);
+                            emailTemplate.Replace("##ACCOUNTCOUNTRY##", profile.Country);
+                            emailTemplate.Replace("##ACCOUNTTIMEZONE##", profile.TimeZone);
+                            emailTemplate.Replace("##ACCOUNTLANGUAGE##", profile.Language);
+                            emailTemplate.Replace("##ACCOUNTEMAIL##", profile.EmailAddress);
+                            emailTemplate.Replace("##ACCOUNTNAME##", profile.AccountName);
+                            emailTemplate.Replace("##PERSONNAME##", $"{profile.FirstName} {profile.LastName}");
+                            emailTemplate.Replace("##CODE##", code);
+                            emailTemplate.Replace("##USERID##", userId);
+                            emailTemplate.Replace("##SITENAME##", siteName);
+                            emailTemplate.Replace("##SITEADDRESS##", address);
+                            emailTemplate.Replace("##CALLBACKURL##", HtmlEncoder.Default.Encode(callbackUrl));
+
+                            await _emailSender.SendEmailAsync(Input.Username, emailSubject, emailTemplate.ToString());
+
+                            // If account confirmation is required, we need to show the link if we don't have a real email sender
+                            if (_userManager.Options.SignIn.RequireConfirmedAccount)
+                            {
+                                return Redirect($"{GlobalConfiguration.BasePath}/Identity/Account/RegisterConfirmation?Email={Input.Username}");
+                            }
+
+                            await _signInManager.SignInAsync(user, isPersistent: false, info.LoginProvider);
+                            return Redirect(ReturnUrl);
+                        }
+                    }
+                    foreach (var error in result.Errors)
+                    {
+                        ModelState.AddModelError(string.Empty, error.Description);
                     }
                 }
-                foreach (var error in result.Errors)
-                {
-                    ModelState.AddModelError(string.Empty, error.Description);
-                }
-            }
 
-            ProviderDisplayName = info.ProviderDisplayName;
+                ProviderDisplayName = info.ProviderDisplayName;
+
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError("Exception: {Message}", ex.Message);
+                ExceptionRepository.InsertException(ex);
+            }
             return Page();
         }
 

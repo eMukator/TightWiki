@@ -1,8 +1,9 @@
 ﻿@using TightWiki.Models
+@using static TightWiki.Library.Constants
 @inject IViewLocalizer Localizer
 @model TightWiki.Models.ViewModels.Page.PageEditViewModel
 @{
-    Layout = "/Views/Shared/_Layout.cshtml";
+    Layout = "_Layout";
     var sessionState = ViewData["SessionState"] as TightWiki.SessionState ?? throw new Exception("Wiki State Context cannot be null.");
 }
 
@@ -57,9 +58,96 @@
 </style>
 
 <script>
-    const editMode = @(Model?.Id > 0 && @sessionState.CanCreate == true ? "true" : "false");
+    function addClipboardImagePasteUpload(editor) {
+        const inputEl = editor.getInputField();
+        inputEl.addEventListener('paste', async (e) => {
+        try {
+            const dt = e.clipboardData || window.clipboardData;
+            if (!dt) return;
+
+            const files = [];
+
+            //Prefer items (for type checking). Fallback to files list.
+            if (dt.items && dt.items.length) {
+                for (const item of dt.items) {
+                    if (item.kind === 'file') {
+                        const file = item.getAsFile();
+                        if (file && /^image\//i.test(file.type))
+                        {
+                            files.push(file);
+                        }
+                    }
+                }
+            } else if (dt.files && dt.files.length) {
+                for (const f of dt.files) {
+                    if (f && /^image\//i.test(f.type)) {
+                        files.push(f);
+                    }
+                }
+            }
+
+            if (files.length === 0) return; //Let normal text paste continue
+            e.preventDefault(); //We found images; stop the browser from pasting base64 content
+
+            //Build FormData the same way our drag/drop uses it
+            const formData = new FormData();
+            const chosenNames = [];
+            let count = 0;
+
+            for (const file of files) {
+                const safeName = suggestFilenameForPaste(file, count++);
+                formData.append("postedFiles", file, safeName);
+                chosenNames.push(safeName);
+            }
+
+            const resp = await fetch('@Url.Action("UploadDragDrop", "File")/@sessionState.PageNavigationEscaped', {
+                method: 'POST',
+                body: formData
+            });
+            const result = await resp.json();
+
+            //Insert tags at cursor
+            const doc = editor.getDoc();
+            const cursor = doc.getCursor();
+            const tags = chosenNames.map(n => toWikiimageTag(n)).join("\n");
+            doc.replaceRange(tags, cursor);
+
+           //Refresh the attachments list
+           $("#uploadedFiles").load("@GlobalConfiguration.BasePath/File/PageAttachments/@sessionState.PageNavigationEscaped");
+
+         } catch (err) {
+           const uploadStatus = document.getElementById('uploadStatus');
+           if (uploadStatus) {
+             uploadStatus.innerHTML = `<p>@Localizer["Unexpected Error"]: ${err.message}</p>`;
+           }
+           console.error(err);
+         }
+       });
+     }
+
+     //Create a readable filename.
+     function suggestFilenameForPaste(file, count) {
+       const extFromName = (file.name || '').split('.').pop();
+       const extFromType = (file.type || '').split('/')[1];
+       const ext = (extFromName && extFromName.length <= 5) ? extFromName : (extFromType || 'png');
+       const stamp = new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 15);
+       return `clip_${stamp}_${count}.${ext}`;
+     }
+
+     //Convert filename to TightWiki tag.
+     function toWikiimageTag(name) {
+       const ext = (name.split('.').pop() || '').toLowerCase();
+       const isImage = ['png','jpg','jpeg','gif','bmp','webp','avif','tif','tiff'].includes(ext);
+       return isImage ? `##Image("${name}")` : `##File(${name})`;
+     }
+</script>
+
+<script>
+    const emojiApi = '@(GlobalConfiguration.BasePath)/File/AutoCompleteEmoji';
+    const editMode = @(Model?.Id > 0 && @sessionState.HoldsPermission(WikiPermission.Create) ? "true" : "false");
     var editor;
     var featureInsertModalTable;
+    var insertEmojiModal;
     var insertLinkModal;
     var featureInsertModal;
     var templatesModal;
@@ -94,6 +182,7 @@
 
     document.addEventListener("DOMContentLoaded", function () {
 
+    insertEmojiModal = new bootstrap.Modal('#insertEmojiModal');
     insertLinkModal = new bootstrap.Modal('#insertLinkModal');
     featureInsertModal = new bootstrap.Modal('#featureInsertModal');
     templatesModal = new bootstrap.Modal('#templatesModal');
@@ -116,7 +205,7 @@
             placeholder: "@Localizer["Search"]...",
             minimumInputLength: 0,
             ajax: {
-                url: '/Page/Autocomplete',
+                url: '@GlobalConfiguration.BasePath/Page/AutoCompletePage',
                 dataType: 'json',
                 delay: 250,
                 data: function(params) {
@@ -312,6 +401,9 @@
             const dropSection = document.getElementById('dropSection');
             const fileInput = document.getElementById('fileInput');
             const uploadStatus = document.getElementById('uploadStatus');
+
+            addClipboardImagePasteUpload(editor);
+
             // Handle dragover event
             dropSection.addEventListener('dragover', (e) => {
                 e.preventDefault();
@@ -390,6 +482,79 @@
                 });
         }
 
+       function onInsertEmoji(item){
+           const markdown = `%%${item.text}%%`;
+           const doc = editor.getDoc();
+           var selection = doc.getSelection();
+
+           doc.replaceSelection(markdown);
+
+           const cursor = doc.getCursor();
+           doc.setSelection({
+               line: cursor.line,
+               ch: cursor.ch - (markdown.length + 4)
+           }, {
+               line: cursor.line,
+               ch: cursor.ch
+           });
+
+           insertEmojiModal.hide();
+           editor.focus();
+       }
+
+        function debounce(fn, ms=350){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; }
+
+        const imagesTable = new Tabulator("#emojiResultsTable", {
+            layout: "fitColumns",
+            placeholder: '@Localizer["Search for more emojis."]',
+            ajaxLoader: true,
+            ajaxContentType: "json",
+            ajaxResponse: function(url, params, resp) { return resp; },
+            columns: [
+                {
+                    title:"Image", field:"text", width:110, headerSort:false, hozAlign:"center",
+                    formatter:(cell)=>{
+                        const url = cell.getValue();
+                        return `<img src="@GlobalConfiguration.BasePath/File/Emoji/${url}" class="img-thumbnail" style="height:32px;max-width:32px;object-fit:cover;">`;
+                    }
+                },
+                {
+                    title:"Name", field:"text", minWidth:160, headerSort:false
+                },
+                {
+                    title:"Action", width:110, headerSort:false, hozAlign:"center",
+                    formatter: () => `<button type="button" class="btn btn-thin btn-primary">Insert</button>`,
+                    cellClick: (e, cell) => onInsertEmoji(cell.getRow().getData())
+                },
+            ],
+        });
+
+        async function searchImages(q) {
+            if(!q?.trim()){
+                imagesTable.clearData();
+                return;
+            }
+            imagesTable.setData(emojiApi, { q });
+       }
+
+       const $search = document.getElementById("insertEmojiModalSearchText");
+       const $insertEmojiModalSearchButton = document.getElementById("insertEmojiModalSearchButton");
+       const debounced = debounce(()=>searchImages($search.value), 400);
+
+       $search.addEventListener("input", debounced);
+       $search.addEventListener("keydown", e=>{ if(e.key==="Enter") searchImages($search.value); });
+       $insertEmojiModalSearchButton.addEventListener("click", ()=>searchImages($search.value));
+
+        //insertEmojiModal is about to be shown.
+        document.getElementById('insertEmojiModal')?.addEventListener('shown.bs.modal',() => {
+            //If the imagesTable has no data, load a default emoji list.
+            if(imagesTable.getData().length == 0)
+            {
+                imagesTable.setData(emojiApi, { q: '' });
+            }
+            $search.focus();
+        });
+
         setInterval(ping, 60000);
     });
 
@@ -415,17 +580,18 @@
 
 </script>
 
+
 <div class="bodyDiv">
-    <div class="card">
+    <div class="card shadow-lg">
         <div class="card-header"><h3>@Localizer["Content"]</h3></div>
         <div class="card-body">
-            @using (Html.BeginForm(null, null, FormMethod.Post, new { action = $"{GlobalConfiguration.BasePath}{Context.Request.Path}" }))
+            @using (Html.BeginForm(FormMethod.Post))
             {
                 @Html.HiddenFor(x => x.Id)
 
                 <div class="form-group">
                     <button type="submit" class="btn btn-primary">@Localizer["Save"]</button>
-                    @if (sessionState.CanView == true)
+                    @if (sessionState.HoldsPermission(WikiPermission.Read))
                     {
                         if (Model?.Id > 0)
                         {
@@ -483,6 +649,9 @@
                         <button type="button" class="btn btn-sm btn-dark d-flex align-items-center gap-1 px-2" data-bs-toggle="modal" data-bs-target="#insertLinkModal">
                             <img src="/images/toolbar/toolbar_Dark_Link.png" width="16" height="16" alt="@Localizer["Hyperlink"]...">
                         </button>
+                        <button type="button" class="btn btn-sm btn-dark d-flex align-items-center gap-1 px-2" data-bs-toggle="modal" data-bs-target="#insertEmojiModal">
+                            <img src="/images/toolbar/toolbar_Dark_Emoji.png" width="16" height="16" alt="@Localizer["Emoji"]...">
+                        </button>
 
                         <div style="width:1px; height:24px; background-color:#ccc;"></div>
 
@@ -512,6 +681,9 @@
                         <button type="button" class="btn btn-sm btn-light d-flex align-items-center gap-1 px-2" data-bs-toggle="modal" data-bs-target="#insertLinkModal">
                             <img src="/images/toolbar/toolbar_Light_Link.png" width="16" height="16" alt="@Localizer["Hyperlink"]...">
                         </button>
+                        <button type="button" class="btn btn-sm btn-light d-flex align-items-center gap-1 px-2" data-bs-toggle="modal" data-bs-target="#insertEmojiModal">
+                            <img src="/images/toolbar/toolbar_Light_Emoji.png" width="16" height="16" alt="@Localizer["Emoji"]...">
+                        </button>
 
                         <div style="width:1px; height:24px; background-color:#222;"></div>
 
@@ -527,7 +699,7 @@
 
                 <div class="form-group">
                     <button type="submit" class="btn btn-primary">@Localizer["Save"]</button>
-                    @if (Model?.Id > 0 && sessionState.CanView == true)
+                    @if (Model?.Id > 0 && sessionState.HoldsPermission(WikiPermission.Read))
                     {
                         <a href="@GlobalConfiguration.BasePath/@sessionState.PageNavigation" target="_blank" rel="noopener" class="btn btn-success" role="button">@Localizer["View"]</a>
                         <a href="@GlobalConfiguration.BasePath/@sessionState.PageNavigation/Export" target="_blank" rel="noopener" class="btn btn-secondary" role="button">@Localizer["Export"]</a>
@@ -539,10 +711,10 @@
     </div>
     <br />
 
-    <div class="card">
+    <div class="card shadow-lg">
         <div class="card-header"><h3>@Localizer["Attachments"]</h3></div>
         <div class="card-body">
-            @if (Model?.Id > 0 && @sessionState.CanCreate == true)
+            @if (Model?.Id > 0 && sessionState.HoldsPermission(WikiPermission.Create))
             {
                 <div id="dropSection" class="dropSection">
                     <span class="d-inline-block">@Localizer["Drop file attachments here or click to upload manually."]</span>
@@ -667,6 +839,27 @@
                     <em class="small"></em>
                     <button type="button" class="btn btn-success float-end" id="insertLinkModalInsertButton">@Localizer["Insert"]</button>
                 </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal" tabindex="-1" id="insertEmojiModal" aria-labelledby="insertEmojiModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="insertEmojiModalLabel">@Localizer["Insert Emoji"]</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="@Localizer["Close"]"></button>
+            </div>
+
+            <div class="modal-body p-3">
+                <div class="d-flex align-items-center gap-2 mb-2">
+                    <input id="insertEmojiModalSearchText" type="text" class="form-control" placeholder="Search for more emojis.">
+                    <button id="insertEmojiModalSearchButton" type="button" class="btn btn-outline-secondary">Search</button>
+                </div>
+
+                <div id="emojiResultsTable" class="border rounded mb-2" style="max-height: 360px;"></div>
+                <a href="@GlobalConfiguration.BasePath/Wiki_Help::List_Of_All_Emojis" target="_blank" rel="noopener noreferrer">Having trouble finding an emoji? View them all.</a>
             </div>
         </div>
     </div>
