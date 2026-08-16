@@ -146,3 +146,7 @@ TightWiki/Plugins/
 TightWiki.Plugin.Example/obj/
 
 TightWiki.Plugin.Example/bin/
+
+TightWiki.SharedResources/bin/
+
+TightWiki.SharedResources/obj/
