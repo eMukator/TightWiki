@@ -29,5 +29,23 @@ namespace TightWiki.Repository
 
         public async Task<List<TwDefaultFeatureTemplate>> GetDefaultFeatureTemplates()
             => await DefaultsFactory.QueryAsync<TwDefaultFeatureTemplate>(@"Scripts\Defaults\GetDefaultFeatureTemplates.sql");
+
+        /// <summary>
+        /// Always returns an empty collection on SQLite: unlike the other Default* tables, "Defaults\defaults.db"
+        /// carries no Emoji data - the SQLite install path seeds its Emoji database by copying the whole,
+        /// pre-populated Data\emoji.db file rather than going through this seed mechanism (see
+        /// DatabaseManager.CreateDefaultsDatabase / EmojiRepository). This method only exists to satisfy the
+        /// shared ITwDefaultsRepository contract for the future EF-based providers, which will seed from
+        /// Seed\tightwiki.seed.zip instead (Database-Providers-Plan.md chapter 4.6) - it must never be wired into
+        /// DatabaseManager.ApplyAllSeedData for SQLite, as that would change today's (correct) no-op behavior.
+        /// </summary>
+        public Task<List<TwDefaultEmoji>> GetDefaultEmojis()
+            => Task.FromResult(new List<TwDefaultEmoji>());
+
+        /// <summary>
+        /// Always returns an empty collection on SQLite - see <see cref="GetDefaultEmojis"/> for why.
+        /// </summary>
+        public Task<List<TwDefaultEmojiCategory>> GetDefaultEmojiCategories()
+            => Task.FromResult(new List<TwDefaultEmojiCategory>());
     }
 }

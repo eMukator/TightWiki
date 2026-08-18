@@ -31,5 +31,20 @@ namespace TightWiki.Plugin.Interfaces.Repository
         /// Returns all default feature templates used to seed the database.
         /// </summary>
         Task<List<TwDefaultFeatureTemplate>> GetDefaultFeatureTemplates();
+
+        /// <summary>
+        /// Returns all default emoji (metadata only - no image bytes; see <see cref="TwDefaultEmoji.ImageEntry"/>)
+        /// used to seed the database. The SQLite provider does not seed emoji through this mechanism (it gets them
+        /// "for free" via a full copy of Data\emoji.db) and therefore returns an empty collection; this method
+        /// exists for provider-neutral seeding (see Database-Providers-Plan.md chapter 4.6).
+        /// </summary>
+        Task<List<TwDefaultEmoji>> GetDefaultEmojis();
+
+        /// <summary>
+        /// Returns all default emoji-to-category associations used to seed the database. As with
+        /// <see cref="GetDefaultEmojis"/>, the SQLite provider returns an empty collection since it does not seed
+        /// emoji through this mechanism.
+        /// </summary>
+        Task<List<TwDefaultEmojiCategory>> GetDefaultEmojiCategories();
     }
 }
