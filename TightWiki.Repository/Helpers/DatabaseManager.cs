@@ -105,6 +105,13 @@ namespace TightWiki.Repository.Helpers
         }
 
         /// <summary>
+        /// SQLite implementation of <see cref="ITwDatabaseManager.InitializeSchema"/>: applies any pending
+        /// versioned upgrade scripts (see <see cref="ApplyDatabaseUpgradeScripts"/>). Returns true if an
+        /// upgrade was performed, which is used by the caller as the trigger to run <see cref="ApplyAllSeedData"/>.
+        /// </summary>
+        public async Task<bool> InitializeSchema() => await ApplyDatabaseUpgradeScripts(Logger);
+
+        /// <summary>
         /// See @Initialization.Versions.md
         /// Returns true if an upgrade was performed, false if the database was already at the latest version.
         /// </summary>

@@ -12,9 +12,11 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using NTDLS.Helpers;
+using NTDLS.SqliteDapperWrapper;
 using TightWiki.Engine;
 using TightWiki.Library;
 using TightWiki.Library.Dummy;
+using TightWiki.Library.Extensions;
 using TightWiki.Plugin;
 using TightWiki.Plugin.Interfaces;
 using TightWiki.Plugin.Interfaces.Repository;
@@ -32,8 +34,8 @@ namespace TightWiki
 
             var builder = WebApplication.CreateBuilder(args);
 
-            var databaseManager = new DatabaseManager(builder.Configuration);
-            bool wasDatabaseUpgraded = await databaseManager.ApplyDatabaseUpgradeScripts(databaseManager.Logger);
+            ITwDatabaseManager databaseManager = new DatabaseManager(builder.Configuration);
+            bool wasDatabaseUpgraded = await databaseManager.InitializeSchema();
 
             //This is the minimum log level for the database logger, which is used for logging application events and errors to the database.
             var minimumLogLevel = Enum.Parse<LogLevel>(builder.Configuration.GetValue("EventLogLevel", LogLevel.Information.ToString()));
@@ -41,10 +43,10 @@ namespace TightWiki
             builder.Logging.ClearProviders();
             builder.Logging.AddProvider(new DatabaseLoggerProvider(databaseManager.LoggingRepository, minimumLogLevel));
 
-            var userConnectionString = databaseManager.UsersRepository.UsersFactory.Ephemeral(o => o.NativeConnection.ConnectionString);
+            var userConnectionString = GetIdentityConnectionString(builder.Configuration);
             builder.Services.AddDbContext<ApplicationDbContext>(options => options.UseSqlite(userConnectionString));
 
-            var wikiConfigurationManager = new WikiConfigurationManager(builder.Configuration, databaseManager);
+            var wikiConfigurationManager = new WikiConfigurationManager(builder.Configuration, (DatabaseManager)databaseManager);
 
             // Add DiffPlex services.
             builder.Services.AddScoped<IDiffer, Differ>();
@@ -106,7 +108,7 @@ namespace TightWiki
             builder.Services.AddSingleton<ITwPageRepository>(databaseManager.PageRepository);
             builder.Services.AddSingleton<ITwUsersRepository>(databaseManager.UsersRepository);
             builder.Services.AddSingleton<ITwDatabaseManager>(databaseManager);
-            builder.Services.AddSingleton<ISpannedRepository>(databaseManager);
+            builder.Services.AddSingleton<ISpannedRepository>((ISpannedRepository)databaseManager);
 
             builder.Services.AddDefaultIdentity<IdentityUser>(options => options.SignIn.RequireConfirmedAccount = requireConfirmedAccount)
                 .AddEntityFrameworkStores<ApplicationDbContext>();
@@ -396,6 +398,25 @@ namespace TightWiki
             }
 
             return true;
+        }
+
+        /// <summary>
+        /// Derives the SQLite connection string for the users database (used to configure ASP.NET Core
+        /// Identity's <see cref="ApplicationDbContext"/>) directly from configuration, using the same
+        /// connection-string resolution/normalization that <see cref="TightWiki.Repository.UsersRepository"/>
+        /// applies internally - without needing a live repository instance to read it from.
+        /// </summary>
+        private static string GetIdentityConnectionString(IConfiguration configuration)
+        {
+            var configConnectionString = configuration.GetDatabaseConnectionString("ConfigConnection", "config.db");
+            var configDatabaseFile = new SqliteManagedFactory(configConnectionString).Ephemeral(o => o.NativeConnection.DataSource);
+
+            var safeUsersDbPath = Path.Combine(Path.GetDirectoryName(configDatabaseFile)
+                ?? throw new Exception("Could not determine directory of configuration database file"), "users.db");
+
+            var usersConnectionString = configuration.GetDatabaseConnectionString("UsersConnection", "users.db", safeUsersDbPath);
+
+            return new SqliteManagedFactory(usersConnectionString).Ephemeral(o => o.NativeConnection.ConnectionString);
         }
     }
 }

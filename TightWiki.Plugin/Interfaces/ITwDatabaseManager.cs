@@ -1,4 +1,5 @@
 ﻿using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Logging;
 using TightWiki.Plugin.Interfaces.Repository;
 
 namespace TightWiki.Plugin.Interfaces
@@ -8,6 +9,21 @@ namespace TightWiki.Plugin.Interfaces
     /// </summary>
     public interface ITwDatabaseManager
     {
+        /// <summary>
+        /// Gets the logger used by this database manager. Exposed here (rather than only via DI) because it is
+        /// needed as early as construction time/bootstrap, before the service provider is available.
+        /// </summary>
+        ILogger Logger { get; }
+
+        /// <summary>
+        /// Initializes/upgrades the database schema to the version required by the running assembly.
+        /// SQLite: runs ApplyDatabaseUpgradeScripts; a future EF Core based implementation would run
+        /// Database.MigrateAsync() instead.
+        /// </summary>
+        /// <returns>true if the schema was changed by this call (i.e. an upgrade/migration was actually
+        /// applied), which is used as the trigger for seeding via <see cref="ApplyAllSeedData"/>.</returns>
+        Task<bool> InitializeSchema();
+
         /// <summary>
         /// Gets the repository used to access configuration settings.
         /// </summary>
