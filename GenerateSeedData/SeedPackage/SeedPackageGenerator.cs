@@ -84,12 +84,17 @@ namespace GenerateSeedData.SeedPackage
             var emojiManifest = new List<SeedEmoji>();
             foreach (var emoji in sourceEmojis)
             {
-                string imageEntryName = $"Emoji/Images/{emoji.Id}{GetExtensionForMimeType(emoji.MimeType)}";
+                //emoji.db stores Emoji.ImageData GZip-compressed (see TightWiki.Library.Utility.Compress/Decompress,
+                //which the runtime FileController calls before handing bytes to MagickImage) - not raw image bytes.
+                //Decompress here so the zip entry contains the actual image, then derive the extension from the
+                //real (decompressed) byte signature rather than trusting the MimeType column blindly.
+                var imageData = DecompressIfGZip(emoji.ImageData ?? []);
+                string extension = GetExtensionFromContent(imageData) ?? GetExtensionForMimeType(emoji.MimeType);
+                string imageEntryName = $"Emoji/Images/{emoji.Id}{extension}";
 
                 var imageEntry = archive.CreateEntry(imageEntryName, CompressionLevel.Optimal);
                 using (var entryStream = imageEntry.Open())
                 {
-                    var imageData = emoji.ImageData ?? [];
                     entryStream.Write(imageData, 0, imageData.Length);
                 }
 
@@ -118,8 +123,10 @@ namespace GenerateSeedData.SeedPackage
         }
 
         /// <summary>
-        /// Maps an emoji's stored MIME type to a file extension for its Emoji/Images/* zip entry. Falls back to
-        /// ".bin" for anything unrecognized rather than failing the whole export over one odd row.
+        /// Maps an emoji's stored MIME type to a file extension for its Emoji/Images/* zip entry. Used only as a
+        /// fallback when <see cref="GetExtensionFromContent"/> can't recognize the actual bytes (e.g. SVG, which
+        /// has no fixed binary signature). Falls back to ".bin" for anything unrecognized rather than failing the
+        /// whole export over one odd row.
         /// </summary>
         private static string GetExtensionForMimeType(string mimeType) => mimeType.Trim().ToLowerInvariant() switch
         {
@@ -131,5 +138,63 @@ namespace GenerateSeedData.SeedPackage
             "image/bmp" => ".bmp",
             _ => ".bin",
         };
+
+        /// <summary>
+        /// emoji.db's Emoji.ImageData column stores images GZip-compressed - see
+        /// TightWiki.Library.Utility.Compress/Decompress, which the runtime's FileController calls on every
+        /// ImageData read before decoding it as an image. Detects the GZip magic number (1F 8B) and decompresses
+        /// so the Emoji/Images/* zip entry holds the actual image bytes instead of the compressed container.
+        /// Data that isn't GZip-compressed (magic number doesn't match) is returned unchanged.
+        /// </summary>
+        private static byte[] DecompressIfGZip(byte[] data)
+        {
+            if (data.Length < 2 || data[0] != 0x1F || data[1] != 0x8B)
+            {
+                return data;
+            }
+
+            using var compressedStream = new MemoryStream(data);
+            using var decompressor = new GZipStream(compressedStream, CompressionMode.Decompress);
+            using var decompressedStream = new MemoryStream();
+            decompressor.CopyTo(decompressedStream);
+            return decompressedStream.ToArray();
+        }
+
+        /// <summary>
+        /// Derives a file extension from an image's actual byte signature (magic number) rather than trusting the
+        /// MimeType column blindly. Returns null when the content doesn't match a known binary signature (e.g.
+        /// SVG, which is text-based) so the caller can fall back to <see cref="GetExtensionForMimeType"/>.
+        /// </summary>
+        private static string? GetExtensionFromContent(byte[] data)
+        {
+            if (data.Length >= 8 && data[0] == 0x89 && data[1] == 0x50 && data[2] == 0x4E && data[3] == 0x47
+                && data[4] == 0x0D && data[5] == 0x0A && data[6] == 0x1A && data[7] == 0x0A)
+            {
+                return ".png";
+            }
+
+            if (data.Length >= 6 && data[0] == 0x47 && data[1] == 0x49 && data[2] == 0x46 && data[3] == 0x38)
+            {
+                return ".gif";
+            }
+
+            if (data.Length >= 3 && data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF)
+            {
+                return ".jpg";
+            }
+
+            if (data.Length >= 12 && data[0] == 0x52 && data[1] == 0x49 && data[2] == 0x46 && data[3] == 0x46
+                && data[8] == 0x57 && data[9] == 0x45 && data[10] == 0x42 && data[11] == 0x50)
+            {
+                return ".webp";
+            }
+
+            if (data.Length >= 2 && data[0] == 0x42 && data[1] == 0x4D)
+            {
+                return ".bmp";
+            }
+
+            return null;
+        }
     }
 }
