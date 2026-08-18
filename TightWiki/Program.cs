@@ -20,7 +20,9 @@ using TightWiki.Library.Extensions;
 using TightWiki.Plugin;
 using TightWiki.Plugin.Interfaces;
 using TightWiki.Plugin.Interfaces.Repository;
+#if SQLITE_PROVIDER
 using TightWiki.Repository.Helpers;
+#endif
 using TightWiki.Translations;
 using static TightWiki.Plugin.TwConstants;
 
@@ -30,11 +32,15 @@ namespace TightWiki
     {
         public static async Task Main(string[] args)
         {
+#if SQLITE_PROVIDER
             SqlMapper.AddTypeHandler(new GuidTypeHandler());
+#endif
 
             var builder = WebApplication.CreateBuilder(args);
 
+#if SQLITE_PROVIDER
             ITwDatabaseManager databaseManager = new DatabaseManager(builder.Configuration);
+#endif
             bool wasDatabaseUpgraded = await databaseManager.InitializeSchema();
 
             //This is the minimum log level for the database logger, which is used for logging application events and errors to the database.
@@ -403,8 +409,9 @@ namespace TightWiki
         /// <summary>
         /// Derives the SQLite connection string for the users database (used to configure ASP.NET Core
         /// Identity's <see cref="ApplicationDbContext"/>) directly from configuration, using the same
-        /// connection-string resolution/normalization that <see cref="TightWiki.Repository.UsersRepository"/>
-        /// applies internally - without needing a live repository instance to read it from.
+        /// connection-string resolution/normalization that <c>TightWiki.Repository.UsersRepository</c>
+        /// applies internally - without needing a live repository instance to read it from. Referenced by
+        /// name rather than <c>cref</c> since this type is only present when built with DataProvider=Sqlite.
         /// </summary>
         private static string GetIdentityConnectionString(IConfiguration configuration)
         {

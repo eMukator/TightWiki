@@ -6,6 +6,20 @@
 		<Version>2.38.0</Version>
 	</PropertyGroup>
 
+	<!--
+		DataProvider selects which database driver this build targets. Today only "Sqlite" (the default)
+		is implemented; future MSSQL/Postgres drivers will plug in here via their own ProjectReference/
+		PackageReference conditions and a corresponding DefineConstants branch, e.g.:
+		  -p:DataProvider=SqlServer
+	-->
+	<PropertyGroup>
+		<DataProvider Condition="'$(DataProvider)'==''">Sqlite</DataProvider>
+	</PropertyGroup>
+
+	<PropertyGroup Condition="'$(DataProvider)'=='Sqlite'">
+		<DefineConstants>$(DefineConstants);SQLITE_PROVIDER</DefineConstants>
+	</PropertyGroup>
+
 	<PropertyGroup Condition="'$(Configuration)'=='Release'">
 		<DebugSymbols>False</DebugSymbols>
 		<DebugType>None</DebugType>
@@ -30,7 +44,7 @@
 		<PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.10" />
 		<PackageReference Include="Microsoft.AspNetCore.Diagnostics.EntityFrameworkCore" Version="10.0.10" />
 		<PackageReference Include="Microsoft.AspNetCore.Identity.UI" Version="10.0.10" />
-		<PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.10" />
+		<PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.10" Condition="'$(DataProvider)'=='Sqlite'" />
 		<PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="10.0.10">
 			<PrivateAssets>all</PrivateAssets>
 			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
@@ -42,7 +56,7 @@
 	<ItemGroup>
 		<ProjectReference Include="..\TightWiki.Engine\TightWiki.Engine.csproj" />
 		<ProjectReference Include="..\TightWiki.Library\TightWiki.Library.csproj" />
-		<ProjectReference Include="..\TightWiki.Repository\TightWiki.Repository.csproj" />
+		<ProjectReference Include="..\TightWiki.Repository\TightWiki.Repository.csproj" Condition="'$(DataProvider)'=='Sqlite'" />
 		<ProjectReference Include="..\TightWiki.SharedResources\TightWiki.SharedResources.csproj" />
 	</ItemGroup>
 
