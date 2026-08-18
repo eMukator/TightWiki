@@ -1,5 +1,4 @@
-﻿using NTDLS.SqliteDapperWrapper;
-using TightWiki.Plugin.Models;
+﻿using TightWiki.Plugin.Models;
 
 namespace TightWiki.Plugin.Interfaces.Repository
 {
@@ -226,11 +225,6 @@ namespace TightWiki.Plugin.Interfaces.Repository
         Task<int> GetCurrentPageRevision(int pageId);
 
         /// <summary>
-        /// Returns the current revision number for the specified page using an existing database connection.
-        /// </summary>
-        Task<int> GetCurrentPageRevision(SqliteManagedInstance connection, int pageId);
-
-        /// <summary>
         /// Returns limited page info (excluding full content) for the specified page and optional revision number.
         /// </summary>
         Task<TwPage?> GetLimitedPageInfoByIdAndRevision(int pageId, int? revision = null);
@@ -426,16 +420,6 @@ namespace TightWiki.Plugin.Interfaces.Repository
         /// Returns all file attachment info records associated with the specified page ID.
         /// </summary>
         Task<List<TwPageFileAttachmentInfo>> GetPageFilesInfoByPageId(int pageId);
-
-        /// <summary>
-        /// Returns file revision info for a specific file on a page using an existing database connection.
-        /// </summary>
-        Task<TwPageFileRevisionAttachmentInfo?> GetPageFileInfoByFileNavigation(SqliteManagedInstance connection, int pageId, string fileNavigation);
-
-        /// <summary>
-        /// Returns the current revision attachment info for a specific file on a page using an existing database connection.
-        /// </summary>
-        Task<TwPageFileRevisionAttachmentInfo?> GetPageCurrentRevisionAttachmentByFileNavigation(SqliteManagedInstance connection, int pageId, string fileNavigation);
 
         /// <summary>
         /// Inserts or updates a page file attachment record. Associates the upload with the specified user.
