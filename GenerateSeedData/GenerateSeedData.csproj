@@ -16,6 +16,11 @@
 	  <EmbeddedResource Include="Scripts\RecreateDefaultFeatureTemplatesTable.sql" />
 	  <EmbeddedResource Include="Scripts\GetFeatureTemplates.sql" />
 	  <EmbeddedResource Include="Scripts\GetDefaultDefaultWikiPages.sql" />
+	  <EmbeddedResource Include="Scripts\Seed\GetConfigurationGroups.sql" />
+	  <EmbeddedResource Include="Scripts\Seed\GetConfigurationEntries.sql" />
+	  <EmbeddedResource Include="Scripts\Seed\GetMenuItems.sql" />
+	  <EmbeddedResource Include="Scripts\Seed\GetEmoji.sql" />
+	  <EmbeddedResource Include="Scripts\Seed\GetEmojiCategories.sql" />
 	</ItemGroup>
 
 	<ItemGroup>

@@ -1,4 +1,5 @@
-﻿using NTDLS.SqliteDapperWrapper;
+﻿using GenerateSeedData.SeedPackage;
+using NTDLS.SqliteDapperWrapper;
 using System.Text;
 using TightWiki.Plugin.Models.Defaults;
 
@@ -21,6 +22,16 @@ namespace GenerateSeedData
             File.Delete(Path.Combine(outputPath, "defaults.db.zip"));
 
             GenerateDefaultsDatabase(dbPath, outputPath);
+
+            // "Seed\tightwiki.seed.zip" is written next to "Data\" (repo root), by convention, alongside the
+            // SQLite defaults.db above - see Database-Providers-Plan.md chapter 4.6b. dbPath's parent is used as
+            // the repo root so the existing two-argument invocation (GenerateSeedData.bat) doesn't need to change.
+            string repoRoot = Path.GetFullPath(Path.Combine(dbPath, ".."));
+            string seedOutputDir = Path.Combine(repoRoot, "Seed");
+            Directory.CreateDirectory(seedOutputDir);
+            string seedZipPath = Path.Combine(seedOutputDir, "tightwiki.seed.zip");
+
+            SeedPackageGenerator.Generate(dbPath, seedZipPath);
         }
 
 
