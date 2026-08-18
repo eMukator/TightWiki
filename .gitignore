@@ -150,3 +150,7 @@ TightWiki.Plugin.Example/bin/
 TightWiki.SharedResources/bin/
 
 TightWiki.SharedResources/obj/
+
+TightWiki.Data.EfCore/bin/
+
+TightWiki.Data.EfCore/obj/
