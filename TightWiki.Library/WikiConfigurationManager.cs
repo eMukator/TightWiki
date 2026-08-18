@@ -2,16 +2,17 @@
 using System.Diagnostics;
 using TightWiki.Library.Caching;
 using TightWiki.Plugin;
+using TightWiki.Plugin.Interfaces;
 using static TightWiki.Plugin.TwConstants;
 
-namespace TightWiki.Repository.Helpers
+namespace TightWiki.Library
 {
     public class WikiConfigurationManager
     {
-        private readonly DatabaseManager _databaseManager;
+        private readonly ITwDatabaseManager _databaseManager;
         public TwConfiguration WikiConfiguration { get; private set; }
 
-        public WikiConfigurationManager(IConfiguration configuration, DatabaseManager databaseManager)
+        public WikiConfigurationManager(IConfiguration configuration, ITwDatabaseManager databaseManager)
         {
             _databaseManager = databaseManager;
             WikiConfiguration = new TwConfiguration()

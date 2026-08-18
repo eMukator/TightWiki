@@ -46,7 +46,7 @@ namespace TightWiki
             var userConnectionString = GetIdentityConnectionString(builder.Configuration);
             builder.Services.AddDbContext<ApplicationDbContext>(options => options.UseSqlite(userConnectionString));
 
-            var wikiConfigurationManager = new WikiConfigurationManager(builder.Configuration, (DatabaseManager)databaseManager);
+            var wikiConfigurationManager = new WikiConfigurationManager(builder.Configuration, databaseManager);
 
             // Add DiffPlex services.
             builder.Services.AddScoped<IDiffer, Differ>();
