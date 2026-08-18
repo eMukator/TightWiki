@@ -154,3 +154,11 @@ TightWiki.SharedResources/obj/
 TightWiki.Data.EfCore/bin/
 
 TightWiki.Data.EfCore/obj/
+
+_tools/SchemaUpgradeTool/bin/
+
+_tools/SchemaUpgradeTool/obj/
+
+_tools/EfScaffoldTool/bin/
+
+_tools/EfScaffoldTool/obj/
