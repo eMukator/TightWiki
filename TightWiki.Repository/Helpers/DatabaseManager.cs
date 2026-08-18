@@ -317,7 +317,7 @@ namespace TightWiki.Repository.Helpers
 
                 try
                 {
-                    var defaultConfigurationGroups = DefaultsRepository.DefaultsFactory.Query<TwDefaultConfiguration>(@"Scripts\Defaults\GetDefaultConfigurationGroups.sql");
+                    var defaultConfigurationGroups = await DefaultsRepository.GetDefaultConfigurationGroups();
                     foreach (var defaultConfigurationGroup in defaultConfigurationGroups)
                     {
                         await ConfigurationRepository.ConfigFactory.ExecuteAsync(@"Scripts\Defaults\Merge\MergeConfigurationGroup.sql",
@@ -336,7 +336,7 @@ namespace TightWiki.Repository.Helpers
 
                 try
                 {
-                    var defaultConfigurations = DefaultsRepository.DefaultsFactory.Query<TwDefaultConfiguration>(@"Scripts\Defaults\GetDefaultConfigurations.sql");
+                    var defaultConfigurations = await DefaultsRepository.GetDefaultConfigurations();
                     foreach (var defaultConfiguration in defaultConfigurations)
                     {
                         await ConfigurationRepository.ConfigFactory.ExecuteAsync(@"Scripts\Defaults\Merge\MergeConfigurationEntry.sql",
@@ -369,7 +369,7 @@ namespace TightWiki.Repository.Helpers
                 Console.WriteLine("Seeding default themes.");
                 try
                 {
-                    var defaultThemes = DefaultsRepository.DefaultsFactory.Query<TwDefaultTheme>(@"Scripts\Defaults\GetDefaultThemes.sql");
+                    var defaultThemes = await DefaultsRepository.GetDefaultThemes();
                     foreach (var defaultTheme in defaultThemes)
                     {
                         await ConfigurationRepository.ConfigFactory.ExecuteAsync(@"Scripts\Defaults\Merge\MergeTheme.sql",
@@ -412,18 +412,15 @@ namespace TightWiki.Repository.Helpers
 
                     if (defaultDataTypes.Contains(TwDefaultDataType.HelpPages))
                     {
-                        defaultWikiPages.AddRange(DefaultsRepository.DefaultsFactory.Query<TwDefaultWikiPage>(@"Scripts\Defaults\GetDefaultWikiPages.sql",
-                            new { Namespace = "Wiki Help" }));
+                        defaultWikiPages.AddRange(await DefaultsRepository.GetDefaultWikiPages("Wiki Help"));
                     }
                     if (defaultDataTypes.Contains(TwDefaultDataType.IncludePages))
                     {
-                        defaultWikiPages.AddRange(DefaultsRepository.DefaultsFactory.Query<TwDefaultWikiPage>(@"Scripts\Defaults\GetDefaultWikiPages.sql",
-                            new { Namespace = "Include" }));
+                        defaultWikiPages.AddRange(await DefaultsRepository.GetDefaultWikiPages("Include"));
                     }
                     if (defaultDataTypes.Contains(TwDefaultDataType.BuiltinPages))
                     {
-                        defaultWikiPages.AddRange(DefaultsRepository.DefaultsFactory.Query<TwDefaultWikiPage>(@"Scripts\Defaults\GetDefaultWikiPages.sql",
-                            new { Namespace = "Builtin" }));
+                        defaultWikiPages.AddRange(await DefaultsRepository.GetDefaultWikiPages("Builtin"));
                     }
 
                     foreach (var defaultWikiPage in defaultWikiPages)
@@ -469,7 +466,7 @@ namespace TightWiki.Repository.Helpers
 
                 try
                 {
-                    var defaultFeatureTemplates = DefaultsRepository.DefaultsFactory.Query<TwDefaultFeatureTemplate>(@"Scripts\Defaults\GetDefaultFeatureTemplates.sql");
+                    var defaultFeatureTemplates = await DefaultsRepository.GetDefaultFeatureTemplates();
                     foreach (var defaultFeatureTemplate in defaultFeatureTemplates)
                     {
                         await PageRepository.PagesFactory.ExecuteAsync(@"Scripts\Defaults\Merge\MergeFeatureTemplate.sql",
