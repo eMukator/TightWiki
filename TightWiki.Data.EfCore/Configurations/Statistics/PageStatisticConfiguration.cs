@@ -23,7 +23,14 @@ namespace TightWiki.Data.EfCore.Configurations.Statistics
             builder.HasIndex(e => e.PageId, "IX_CompilationStatistics_PageId")
                 .IsUnique();
 
-            //PageId references Pages.Page - cross-schema navigation intentionally not modeled here.
+            //PageId references Pages.Page - real, one-to-one, cross-schema relationship (both schemas now live
+            //in the same TightWikiDbContext, see Database-Providers-Plan.md chapter 4.3). Configured from this
+            //(dependent) side; PageId already carries a UNIQUE index above, which is what makes this one-to-one
+            //rather than one-to-many.
+            builder.HasOne(e => e.Page)
+                .WithOne(e => e.PageStatistic)
+                .HasForeignKey<PageStatistic>(e => e.PageId)
+                .OnDelete(DeleteBehavior.ClientSetNull);
         }
     }
 }

@@ -1,3 +1,5 @@
+using TightWiki.Data.EfCore.Entities.Users;
+
 namespace TightWiki.Data.EfCore.Entities.DeletedPages
 {
     /// <summary>
@@ -43,7 +45,8 @@ namespace TightWiki.Data.EfCore.Entities.DeletedPages
         public string? ChangeSummary { get; set; }
 
         /// <summary>
-        /// The identifier of the user who made this revision.
+        /// The identifier of the user who made this revision. Value-equal to (but not a formal foreign key
+        /// against) <see cref="Users.Profile.UserId"/> - see <see cref="ModifiedByUser"/>.
         /// </summary>
         public Guid ModifiedByUserId { get; set; }
 
@@ -56,5 +59,15 @@ namespace TightWiki.Data.EfCore.Entities.DeletedPages
         /// A hash of <see cref="Body"/> used to detect changes between revisions.
         /// </summary>
         public int DataHash { get; set; }
+
+        /// <summary>
+        /// The profile of the user who made this revision (cross-schema navigation to Users.Profile, via
+        /// <see cref="ModifiedByUserId"/>). Optional - see the remarks on <see cref="Page.CreatedByUser"/>.
+        /// Unlike Pages.PageRevision.ModifiedByUser, no existing raw SQL joins this specific column against
+        /// Profile (GetDeletedPageById.sql/GetDeletedPageRevisionsByIdPaged.sql only surface the parent Page's
+        /// Created/ModifiedByUserId and the DeletionMeta's DeletedByUserId) - added for model
+        /// completeness/consistency per Database-Providers-Plan.md chapter 4.3.
+        /// </summary>
+        public Profile? ModifiedByUser { get; set; }
     }
 }

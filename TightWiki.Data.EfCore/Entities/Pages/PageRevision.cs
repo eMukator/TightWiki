@@ -1,3 +1,5 @@
+using TightWiki.Data.EfCore.Entities.Users;
+
 namespace TightWiki.Data.EfCore.Entities.Pages
 {
     /// <summary>
@@ -43,7 +45,8 @@ namespace TightWiki.Data.EfCore.Entities.Pages
         public string? ChangeSummary { get; set; }
 
         /// <summary>
-        /// The identifier of the user who made this revision.
+        /// The identifier of the user who made this revision. Value-equal to (but not a formal foreign key
+        /// against) <see cref="Users.Profile.UserId"/> - see <see cref="ModifiedByUser"/>.
         /// </summary>
         public Guid ModifiedByUserId { get; set; }
 
@@ -51,6 +54,12 @@ namespace TightWiki.Data.EfCore.Entities.Pages
         /// The date and time this revision was made.
         /// </summary>
         public DateTime ModifiedDate { get; set; }
+
+        /// <summary>
+        /// The profile of the user who made this revision (cross-schema navigation to Users.Profile, via
+        /// <see cref="ModifiedByUserId"/>). Optional - see the remarks on <see cref="Page.CreatedByUser"/>.
+        /// </summary>
+        public Profile? ModifiedByUser { get; set; }
 
         /// <summary>
         /// A hash of <see cref="Body"/> used to detect changes between revisions.

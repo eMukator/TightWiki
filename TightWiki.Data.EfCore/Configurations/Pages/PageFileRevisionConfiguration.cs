@@ -51,6 +51,17 @@ namespace TightWiki.Data.EfCore.Configurations.Pages
                 .WithMany(e => e.PageFileRevisions)
                 .HasForeignKey(e => e.PageFileId)
                 .OnDelete(DeleteBehavior.ClientSetNull);
+
+            //CreatedByUserId is value-equal to Users.Profile.UserId (see Database-Providers-Plan.md chapter 4.3)
+            //but not a real FOREIGN KEY - see PageConfiguration's remarks on CreatedByUser for the full
+            //rationale. LEFT OUTER JOINed against Profile in
+            //GetPageFileAttachmentRevisionsByPageAndFileNavigationPaged.sql.
+            builder.HasOne(e => e.CreatedByUser)
+                .WithMany(e => e.Pages_PageFileRevisions)
+                .HasForeignKey(e => e.CreatedByUserId)
+                .HasPrincipalKey(e => e.UserId)
+                .IsRequired(false)
+                .OnDelete(DeleteBehavior.ClientSetNull);
         }
     }
 }

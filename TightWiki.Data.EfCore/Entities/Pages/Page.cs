@@ -1,3 +1,6 @@
+using TightWiki.Data.EfCore.Entities.Statistics;
+using TightWiki.Data.EfCore.Entities.Users;
+
 namespace TightWiki.Data.EfCore.Entities.Pages
 {
     /// <summary>
@@ -39,7 +42,8 @@ namespace TightWiki.Data.EfCore.Entities.Pages
         public int Revision { get; set; }
 
         /// <summary>
-        /// The identifier of the user who originally created this page.
+        /// The identifier of the user who originally created this page. Value-equal to (but not a formal foreign
+        /// key against) <see cref="Users.Profile.UserId"/> - see <see cref="CreatedByUser"/>.
         /// </summary>
         public Guid CreatedByUserId { get; set; }
 
@@ -49,7 +53,8 @@ namespace TightWiki.Data.EfCore.Entities.Pages
         public DateTime CreatedDate { get; set; }
 
         /// <summary>
-        /// The identifier of the user who last modified this page.
+        /// The identifier of the user who last modified this page. Value-equal to (but not a formal foreign key
+        /// against) <see cref="Users.Profile.UserId"/> - see <see cref="ModifiedByUser"/>.
         /// </summary>
         public Guid ModifiedByUserId { get; set; }
 
@@ -57,6 +62,27 @@ namespace TightWiki.Data.EfCore.Entities.Pages
         /// The date and time this page was last modified.
         /// </summary>
         public DateTime ModifiedDate { get; set; }
+
+        /// <summary>
+        /// The profile of the user who originally created this page (cross-schema navigation to Users.Profile,
+        /// via <see cref="CreatedByUserId"/>). Optional - the raw SQL this navigation mirrors (e.g.
+        /// GetAllPagesPaged.sql) always LEFT OUTER JOINs Profile, and application code never enforces that a
+        /// matching profile exists.
+        /// </summary>
+        public Profile? CreatedByUser { get; set; }
+
+        /// <summary>
+        /// The profile of the user who last modified this page (cross-schema navigation to Users.Profile, via
+        /// <see cref="ModifiedByUserId"/>). Optional - see <see cref="CreatedByUser"/>.
+        /// </summary>
+        public Profile? ModifiedByUser { get; set; }
+
+        /// <summary>
+        /// The compilation/view statistics for this page (cross-schema navigation to Statistics.PageStatistics).
+        /// Optional - a page has no row here until it is first compiled (see
+        /// StatisticsRepository.MergePageCompilationStatistics).
+        /// </summary>
+        public PageStatistic? PageStatistic { get; set; }
 
         /// <summary>
         /// The feature templates (help/markup examples) associated with this page.

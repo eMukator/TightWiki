@@ -1,3 +1,5 @@
+using TightWiki.Data.EfCore.Entities.Users;
+
 namespace TightWiki.Data.EfCore.Entities.Pages
 {
     /// <summary>
@@ -32,6 +34,12 @@ namespace TightWiki.Data.EfCore.Entities.Pages
         /// The date and time this file revision was uploaded.
         /// </summary>
         public DateTime CreatedDate { get; set; }
+
+        /// <summary>
+        /// The profile of the user who uploaded this file revision (cross-schema navigation to Users.Profile,
+        /// via <see cref="CreatedByUserId"/>). Optional - see the remarks on <see cref="Page.CreatedByUser"/>.
+        /// </summary>
+        public Profile? CreatedByUser { get; set; }
 
         /// <summary>
         /// The raw byte content of this file revision.

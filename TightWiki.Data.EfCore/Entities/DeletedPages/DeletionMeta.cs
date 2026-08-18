@@ -1,3 +1,5 @@
+using TightWiki.Data.EfCore.Entities.Users;
+
 namespace TightWiki.Data.EfCore.Entities.DeletedPages
 {
     /// <summary>
@@ -14,7 +16,8 @@ namespace TightWiki.Data.EfCore.Entities.DeletedPages
 
         /// <summary>
         /// The identifier of the user who deleted the page. Nullable in the real schema. Modeled as Guid rather
-        /// than the raw scaffold's int? - see the Fluent configuration.
+        /// than the raw scaffold's int? - see the Fluent configuration. Value-equal to (but not a formal foreign
+        /// key against) <see cref="Users.Profile.UserId"/> - see <see cref="DeletedByUser"/>.
         /// </summary>
         public Guid? DeletedByUserId { get; set; }
 
@@ -23,5 +26,12 @@ namespace TightWiki.Data.EfCore.Entities.DeletedPages
         /// the raw scaffold's int? - see the Fluent configuration.
         /// </summary>
         public DateTime? DeletedDate { get; set; }
+
+        /// <summary>
+        /// The profile of the user who deleted the page (cross-schema navigation to Users.Profile, via
+        /// <see cref="DeletedByUserId"/>). Optional - <see cref="DeletedByUserId"/> is itself nullable, and the
+        /// raw SQL this mirrors (e.g. GetAllDeletedPagesPaged.sql) LEFT OUTER JOINs Profile.
+        /// </summary>
+        public Profile? DeletedByUser { get; set; }
     }
 }

@@ -1,3 +1,5 @@
+using TightWiki.Data.EfCore.Entities.Pages;
+
 namespace TightWiki.Data.EfCore.Entities.Statistics
 {
     /// <summary>
@@ -13,8 +15,8 @@ namespace TightWiki.Data.EfCore.Entities.Statistics
         public int Id { get; set; }
 
         /// <summary>
-        /// The identifier of the page (Pages schema) these statistics belong to. Not modeled as a navigation
-        /// property here - see the cross-schema note in the Fluent configuration.
+        /// The identifier of the page (Pages schema) these statistics belong to. See <see cref="Page"/> for the
+        /// cross-schema navigation.
         /// </summary>
         public int PageId { get; set; }
 
@@ -72,5 +74,13 @@ namespace TightWiki.Data.EfCore.Entities.Statistics
         /// The total number of times this page has been viewed.
         /// </summary>
         public int TotalViewCount { get; set; }
+
+        /// <summary>
+        /// The page (cross-schema navigation to Pages.Page, via <see cref="PageId"/>) these statistics belong
+        /// to. Required - unlike the *UserId navigations elsewhere in this model, application code deletes this
+        /// row (StatisticsRepository.DeletePageStatisticsByPageId) whenever its page is deleted, and every real
+        /// query joining the two (e.g. GetPageStatisticsPaged.sql) uses an INNER JOIN, not a LEFT OUTER JOIN.
+        /// </summary>
+        public Page Page { get; set; } = null!;
     }
 }

@@ -1,3 +1,5 @@
+using TightWiki.Data.EfCore.Entities.Users;
+
 namespace TightWiki.Data.EfCore.Entities.Pages
 {
     /// <summary>
@@ -21,7 +23,8 @@ namespace TightWiki.Data.EfCore.Entities.Pages
         public DateTime CreatedDate { get; set; }
 
         /// <summary>
-        /// The identifier of the user who posted this comment.
+        /// The identifier of the user who posted this comment. Value-equal to (but not a formal foreign key
+        /// against) <see cref="Users.Profile.UserId"/> - see <see cref="User"/>.
         /// </summary>
         public Guid UserId { get; set; }
 
@@ -34,5 +37,11 @@ namespace TightWiki.Data.EfCore.Entities.Pages
         /// The page this comment was posted on.
         /// </summary>
         public Page Page { get; set; } = null!;
+
+        /// <summary>
+        /// The profile of the user who posted this comment (cross-schema navigation to Users.Profile, via
+        /// <see cref="UserId"/>). Optional - see the remarks on <see cref="Page.CreatedByUser"/>.
+        /// </summary>
+        public Profile? User { get; set; }
     }
 }

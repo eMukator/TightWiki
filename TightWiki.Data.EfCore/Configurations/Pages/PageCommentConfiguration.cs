@@ -23,6 +23,16 @@ namespace TightWiki.Data.EfCore.Configurations.Pages
                 .WithMany(e => e.PageComments)
                 .HasForeignKey(e => e.PageId)
                 .OnDelete(DeleteBehavior.ClientSetNull);
+
+            //UserId is value-equal to Users.Profile.UserId (see Database-Providers-Plan.md chapter 4.3) but not
+            //a real FOREIGN KEY in the live database - see PageConfiguration's remarks on CreatedByUser for the
+            //full rationale. LEFT OUTER JOINed against Profile in GetPageCommentsPaged.sql.
+            builder.HasOne(e => e.User)
+                .WithMany(e => e.Pages_PageComments)
+                .HasForeignKey(e => e.UserId)
+                .HasPrincipalKey(e => e.UserId)
+                .IsRequired(false)
+                .OnDelete(DeleteBehavior.ClientSetNull);
         }
     }
 }

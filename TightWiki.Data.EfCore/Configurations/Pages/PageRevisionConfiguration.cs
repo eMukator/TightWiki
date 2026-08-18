@@ -31,6 +31,17 @@ namespace TightWiki.Data.EfCore.Configurations.Pages
 
             //No FOREIGN KEY constraint exists in the real schema for PageId - intentionally not modeled as a
             //navigation/relationship here (see the Page entity's own doc remarks).
+
+            //ModifiedByUserId is value-equal to Users.Profile.UserId (see Database-Providers-Plan.md chapter
+            //4.3) but not a real FOREIGN KEY - see PageConfiguration's remarks on CreatedByUser for the full
+            //rationale. LEFT OUTER JOINed against Profile in GetPageRevisionsInfoByNavigationPaged.sql and
+            //GetPageRevisionByNavigation.sql.
+            builder.HasOne(e => e.ModifiedByUser)
+                .WithMany(e => e.Pages_PageRevisions)
+                .HasForeignKey(e => e.ModifiedByUserId)
+                .HasPrincipalKey(e => e.UserId)
+                .IsRequired(false)
+                .OnDelete(DeleteBehavior.ClientSetNull);
         }
     }
 }

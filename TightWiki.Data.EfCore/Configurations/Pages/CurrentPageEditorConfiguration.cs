@@ -30,6 +30,16 @@ namespace TightWiki.Data.EfCore.Configurations.Pages
             builder.Property(e => e.UtcDate)
                 .IsRequired()
                 .HasColumnName("UTCDate");
+
+            //UserId is value-equal to Users.Profile.UserId (see Database-Providers-Plan.md chapter 4.3) but not
+            //a real FOREIGN KEY - see PageConfiguration's remarks on CreatedByUser for the full rationale. No
+            //existing raw SQL joins this column against Profile - see the entity's own remarks.
+            builder.HasOne(e => e.User)
+                .WithMany(e => e.Pages_CurrentPageEditors)
+                .HasForeignKey(e => e.UserId)
+                .HasPrincipalKey(e => e.UserId)
+                .IsRequired(false)
+                .OnDelete(DeleteBehavior.ClientSetNull);
         }
     }
 }

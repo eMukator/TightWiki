@@ -1,3 +1,5 @@
+using TightWiki.Data.EfCore.Entities.Users;
+
 namespace TightWiki.Data.EfCore.Entities.DeletedPages
 {
     /// <summary>
@@ -34,6 +36,15 @@ namespace TightWiki.Data.EfCore.Entities.DeletedPages
         /// The date and time this file revision was uploaded.
         /// </summary>
         public DateTime CreatedDate { get; set; }
+
+        /// <summary>
+        /// The profile of the user who uploaded this file revision (cross-schema navigation to Users.Profile,
+        /// via <see cref="CreatedByUserId"/>). Optional - see the remarks on <see cref="Page.CreatedByUser"/>. No
+        /// dedicated query exists for this table today, so unlike Pages.PageFileRevision.CreatedByUser, this
+        /// isn't backed by an existing raw SQL join - added for model completeness/consistency per
+        /// Database-Providers-Plan.md chapter 4.3.
+        /// </summary>
+        public Profile? CreatedByUser { get; set; }
 
         /// <summary>
         /// The raw byte content of this file revision.

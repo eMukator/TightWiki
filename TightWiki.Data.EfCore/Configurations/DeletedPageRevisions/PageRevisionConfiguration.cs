@@ -28,6 +28,16 @@ namespace TightWiki.Data.EfCore.Configurations.DeletedPageRevisions
 
             builder.Property(e => e.Description).IsRequired();
             builder.Property(e => e.Body).IsRequired();
+
+            //ModifiedByUserId is value-equal to Users.Profile.UserId (see Database-Providers-Plan.md chapter
+            //4.3) but not a real FOREIGN KEY - see Pages.PageConfiguration's remarks on CreatedByUser for the
+            //full rationale.
+            builder.HasOne(e => e.ModifiedByUser)
+                .WithMany(e => e.DeletedPageRevisions_PageRevisions)
+                .HasForeignKey(e => e.ModifiedByUserId)
+                .HasPrincipalKey(e => e.UserId)
+                .IsRequired(false)
+                .OnDelete(DeleteBehavior.ClientSetNull);
         }
     }
 }

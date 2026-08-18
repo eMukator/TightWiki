@@ -28,6 +28,18 @@ namespace TightWiki.Data.EfCore.Configurations.DeletedPages
 
             //PageId is copied verbatim from the source page - not database-generated.
             builder.Property(e => e.PageId).ValueGeneratedNever();
+
+            //DeletedByUserId is value-equal to Users.Profile.UserId (see Database-Providers-Plan.md chapter 4.3)
+            //but not a real FOREIGN KEY - see Pages.PageConfiguration's remarks on CreatedByUser for the full
+            //rationale. LEFT OUTER JOINed against Profile (as "DeletedUser") in GetAllDeletedPagesPaged.sql/
+            //GetAllDeletedPagesByPageIdPaged.sql/GetDeletedPageById.sql. Already nullable, so IsRequired(false)
+            //here only makes explicit what the nullable FK type already implies.
+            builder.HasOne(e => e.DeletedByUser)
+                .WithMany(e => e.DeletedPages_DeletionMetas)
+                .HasForeignKey(e => e.DeletedByUserId)
+                .HasPrincipalKey(e => e.UserId)
+                .IsRequired(false)
+                .OnDelete(DeleteBehavior.ClientSetNull);
         }
     }
 }
