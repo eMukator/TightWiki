@@ -16,7 +16,7 @@ using TightWiki.Plugin.Models.Defaults;
 namespace TightWiki.Repository.Helpers
 {
     public class DatabaseManager
-        : ITwDatabaseManager
+        : ITwDatabaseManager, ISpannedRepository
     {
         public ConfigurationRepository ConfigurationRepository { get; private set; }
         ITwConfigurationRepository ITwDatabaseManager.ConfigurationRepository => ConfigurationRepository;

@@ -106,6 +106,7 @@ namespace TightWiki
             builder.Services.AddSingleton<ITwPageRepository>(databaseManager.PageRepository);
             builder.Services.AddSingleton<ITwUsersRepository>(databaseManager.UsersRepository);
             builder.Services.AddSingleton<ITwDatabaseManager>(databaseManager);
+            builder.Services.AddSingleton<ISpannedRepository>(databaseManager);
 
             builder.Services.AddDefaultIdentity<IdentityUser>(options => options.SignIn.RequireConfirmedAccount = requireConfirmedAccount)
                 .AddEntityFrameworkStores<ApplicationDbContext>();
