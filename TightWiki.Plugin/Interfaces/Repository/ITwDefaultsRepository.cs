@@ -1,5 +1,3 @@
-using NTDLS.SqliteDapperWrapper;
-
 namespace TightWiki.Plugin.Interfaces.Repository
 {
     /// <summary>
@@ -7,9 +5,5 @@ namespace TightWiki.Plugin.Interfaces.Repository
     /// </summary>
     public interface ITwDefaultsRepository
     {
-        /// <summary>
-        /// SQLite factory that is used to access the database.
-        /// </summary>
-        SqliteManagedFactory DefaultsFactory { get; }
     }
 }

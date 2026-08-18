@@ -1,5 +1,4 @@
 ﻿using Microsoft.AspNetCore.Identity;
-using NTDLS.SqliteDapperWrapper;
 using System.Security.Claims;
 using TightWiki.Plugin.Models;
 
@@ -11,11 +10,6 @@ namespace TightWiki.Plugin.Interfaces.Repository
     /// </summary>
     public interface ITwUsersRepository
     {
-        /// <summary>
-        /// SQLite factory used to access the users database.
-        /// </summary>
-        SqliteManagedFactory UsersFactory { get; }
-
         /// <summary>
         /// Returns true if the specified user is a member of the specified role.
         /// </summary>

@@ -25,7 +25,7 @@ namespace TightWiki.Repository
         public SqliteManagedFactory DeletedPageRevisionsFactory { get; private set; }
 
         public PageRepository(IConfiguration configuration,
-            ITwConfigurationRepository configurationRepository,
+            ConfigurationRepository configurationRepository,
             ITwStatisticsRepository statisticsRepository)
         {
             _configurationRepository = configurationRepository;

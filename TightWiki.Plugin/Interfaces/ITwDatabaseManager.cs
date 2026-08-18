@@ -1,5 +1,4 @@
 ﻿using Microsoft.AspNetCore.Identity;
-using NTDLS.SqliteDapperWrapper;
 using TightWiki.Plugin.Interfaces.Repository;
 
 namespace TightWiki.Plugin.Interfaces
@@ -9,13 +8,6 @@ namespace TightWiki.Plugin.Interfaces
     /// </summary>
     public interface ITwDatabaseManager
     {
-        /// <summary>
-        /// Gets the collection of available databases and their associated managed factories.
-        /// </summary>
-        /// <remarks>Each element in the collection contains the name of the database and the
-        /// corresponding factory used to create connections. The order of the elements is not guaranteed.</remarks>
-        (string Name, SqliteManagedFactory Factory)[] Databases { get; }
-
         /// <summary>
         /// Gets the repository used to access configuration settings.
         /// </summary>

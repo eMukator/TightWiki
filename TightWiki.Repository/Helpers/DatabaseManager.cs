@@ -18,15 +18,33 @@ namespace TightWiki.Repository.Helpers
     public class DatabaseManager
         : ITwDatabaseManager
     {
-        public ITwConfigurationRepository ConfigurationRepository { get; private set; }
-        public ITwDefaultsRepository DefaultsRepository { get; private set; }
-        public ITwEmojiRepository EmojiRepository { get; private set; }
-        public ITwLoggingRepository LoggingRepository { get; private set; }
-        public ITwPageRepository PageRepository { get; private set; }
-        public ITwStatisticsRepository StatisticsRepository { get; private set; }
-        public ITwUsersRepository UsersRepository { get; private set; }
+        public ConfigurationRepository ConfigurationRepository { get; private set; }
+        ITwConfigurationRepository ITwDatabaseManager.ConfigurationRepository => ConfigurationRepository;
 
-        public (string Name, SqliteManagedFactory Factory)[] Databases { get; private set; }
+        public DefaultsRepository DefaultsRepository { get; private set; }
+        ITwDefaultsRepository ITwDatabaseManager.DefaultsRepository => DefaultsRepository;
+
+        public EmojiRepository EmojiRepository { get; private set; }
+        ITwEmojiRepository ITwDatabaseManager.EmojiRepository => EmojiRepository;
+
+        public LoggingRepository LoggingRepository { get; private set; }
+        ITwLoggingRepository ITwDatabaseManager.LoggingRepository => LoggingRepository;
+
+        public PageRepository PageRepository { get; private set; }
+        ITwPageRepository ITwDatabaseManager.PageRepository => PageRepository;
+
+        public StatisticsRepository StatisticsRepository { get; private set; }
+        ITwStatisticsRepository ITwDatabaseManager.StatisticsRepository => StatisticsRepository;
+
+        public UsersRepository UsersRepository { get; private set; }
+        ITwUsersRepository ITwDatabaseManager.UsersRepository => UsersRepository;
+
+        /// <summary>
+        /// Collection of the available databases and their associated managed factories. This is no longer part of
+        /// the public <see cref="ITwDatabaseManager"/> contract (which is meant to stay provider-agnostic) and is
+        /// only used internally for database-upgrade/admin operations within this class.
+        /// </summary>
+        private (string Name, SqliteManagedFactory Factory)[] Databases { get; set; }
 
         /// <summary>
         /// We expose this here because it is the earliest we can prop upa database logger.
