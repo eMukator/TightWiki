@@ -1,3 +1,4 @@
+using TightWiki.Plugin.Models;
 using TightWiki.Plugin.Models.Defaults;
 
 namespace TightWiki.Plugin.Interfaces.Repository
@@ -46,5 +47,13 @@ namespace TightWiki.Plugin.Interfaces.Repository
         /// emoji through this mechanism.
         /// </summary>
         Task<List<TwDefaultEmojiCategory>> GetDefaultEmojiCategories();
+
+        /// <summary>
+        /// Returns all default navigation menu items used to seed the database. As with
+        /// <see cref="GetDefaultEmojis"/>, the SQLite provider returns an empty collection - it gets its
+        /// Config.MenuItem rows "for free" via a full copy of Data\config.db (see Database-Providers-Plan.md
+        /// chapter 4.6) and never populates this via ITwDefaultsRepository.
+        /// </summary>
+        Task<List<TwMenuItem>> GetDefaultMenuItems();
     }
 }

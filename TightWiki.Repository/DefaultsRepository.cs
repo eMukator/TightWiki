@@ -1,5 +1,6 @@
 using NTDLS.SqliteDapperWrapper;
 using TightWiki.Plugin.Interfaces.Repository;
+using TightWiki.Plugin.Models;
 using TightWiki.Plugin.Models.Defaults;
 
 namespace TightWiki.Repository
@@ -47,5 +48,17 @@ namespace TightWiki.Repository
         /// </summary>
         public Task<List<TwDefaultEmojiCategory>> GetDefaultEmojiCategories()
             => Task.FromResult(new List<TwDefaultEmojiCategory>());
+
+        /// <summary>
+        /// Always returns an empty collection on SQLite: "Defaults\defaults.db" carries no MenuItem data - the
+        /// SQLite install path seeds Config.MenuItem by copying the whole, pre-populated Data\config.db file
+        /// rather than going through this seed mechanism (see DatabaseManager.CreateDefaultsDatabase /
+        /// ConfigurationRepository). This method only exists to satisfy the shared ITwDefaultsRepository contract
+        /// for the future EF-based providers, which seed from Seed\tightwiki.seed.zip instead
+        /// (Database-Providers-Plan.md chapter 4.6) - it must never be wired into
+        /// DatabaseManager.ApplyAllSeedData for SQLite, as that would change today's (correct) no-op behavior.
+        /// </summary>
+        public Task<List<TwMenuItem>> GetDefaultMenuItems()
+            => Task.FromResult(new List<TwMenuItem>());
     }
 }

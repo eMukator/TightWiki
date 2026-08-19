@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using System.Text.Json;
 using TightWiki.Plugin.Interfaces.Repository;
+using TightWiki.Plugin.Models;
 using TightWiki.Plugin.Models.Defaults;
 
 namespace TightWiki.Data.EfCore.Seeding
@@ -118,6 +119,10 @@ namespace TightWiki.Data.EfCore.Seeding
         /// <inheritdoc/>
         public Task<List<TwDefaultEmojiCategory>> GetDefaultEmojiCategories()
             => ReadJsonEntryAsync<List<TwDefaultEmojiCategory>>("EmojiCategory.json");
+
+        /// <inheritdoc/>
+        public Task<List<TwMenuItem>> GetDefaultMenuItems()
+            => ReadJsonEntryAsync<List<TwMenuItem>>("MenuItem.json");
 
         /// <summary>
         /// Reads the raw image bytes for a <see cref="TwDefaultEmoji"/> returned by <see cref="GetDefaultEmojis"/>,
