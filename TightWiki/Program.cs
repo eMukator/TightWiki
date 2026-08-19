@@ -51,6 +51,26 @@ namespace TightWiki
 #endif
             bool wasDatabaseUpgraded = await databaseManager.InitializeSchema();
 
+#if SQLSERVER_PROVIDER
+            //WikiConfigurationManager is constructed further down (still before builder.Build()) and eagerly
+            //reads Config.Theme (WikiConfigurationManager.ReloadAll: .Single(o => o.Name == themeName)), which is
+            //empty on a freshly migrated-but-unseeded MSSQL database and crashes the app before Kestrel ever
+            //starts listening (see Database-Providers-Plan.md phase 2a.10). SeedContentDataAsync is the DI-free
+            //half of ApplyAllSeedData (everything except EnsureAdminUser, which needs a
+            //UserManager<IdentityUser> that only exists once the DI container below is built) - see its doc
+            //comment on SqlServerDatabaseManager for how this call and the later, post-Build ApplyAllSeedData
+            //call (below, inside app.Services.CreateScope()) divide the seeding work between them. Same
+            //wasDatabaseUpgraded gate as that later call.
+            if (wasDatabaseUpgraded)
+            {
+                await ((SqlServerDatabaseManager)databaseManager).SeedContentDataAsync(
+                    [TwDefaultDataType.Themes,
+                    TwDefaultDataType.Configurations,
+                    TwDefaultDataType.FeatureTemplates,
+                    TwDefaultDataType.HelpPages]);
+            }
+#endif
+
             //This is the minimum log level for the database logger, which is used for logging application events and errors to the database.
             var minimumLogLevel = Enum.Parse<LogLevel>(builder.Configuration.GetValue("EventLogLevel", LogLevel.Information.ToString()));
 

@@ -180,6 +180,14 @@ namespace TightWiki.Data.EfCore.SqlServer
         /// </summary>
         /// <remarks>
         /// <para>
+        /// Phase 2a.10 split everything except <see cref="EnsureAdminUser"/> out into
+        /// <see cref="SeedContentDataAsync"/> - this method is now a thin wrapper: ensure the admin user exists,
+        /// then delegate. It still exists (rather than every caller using the split halves directly) because it is
+        /// the <see cref="ITwDatabaseManager"/> interface member, whose signature could not change (see
+        /// <see cref="SeedContentDataAsync"/>'s doc comment for why the split exists and how the two calls in
+        /// <c>Program.cs</c> divide the work).
+        /// </para>
+        /// <para>
         /// Mirrors the SQLite reference (<c>TightWiki.Repository.Helpers.DatabaseManager.ApplyAllSeedData</c>) in
         /// structure and in which <paramref name="defaultDataTypes"/> flag gates which section - Configurations,
         /// Themes, {Help,Include,Builtin}Pages, FeatureTemplates. Config.MenuItem and the whole Emoji schema have
@@ -195,9 +203,9 @@ namespace TightWiki.Data.EfCore.SqlServer
         /// updated in place (except <c>ConfigurationEntry.Value</c>, deliberately preserved on conflict so a
         /// re-run never clobbers an administrator's tuned setting - see <c>MergeConfigurationEntry.sql</c> and
         /// <see cref="SeedConfigurations"/>), and missing rows are inserted. In practice this only matters if
-        /// this method is ever invoked more than once against the same database - the only caller
-        /// (<c>Program.cs</c>) gates it on <see cref="InitializeSchema"/> having just performed the very first
-        /// migration.
+        /// this method (or <see cref="SeedContentDataAsync"/>) is ever invoked more than once against the same
+        /// database - both callers (<c>Program.cs</c>) gate on <see cref="InitializeSchema"/> having just
+        /// performed the very first migration.
         /// </para>
         /// <para>
         /// Bootstrapping the admin account needed for <see cref="Page.CreatedByUserId"/>/<c>ModifiedByUserId</c>
@@ -211,9 +219,53 @@ namespace TightWiki.Data.EfCore.SqlServer
         public async Task ApplyAllSeedData(ITwSharedLocalizationText localizer, UserManager<IdentityUser> userManager,
             ITwEngine tightEngine, TwDefaultDataType[] defaultDataTypes)
         {
-            using var context = CreateDbContext();
+            using (var context = CreateDbContext())
+            {
+                await EnsureAdminUser(context, userManager);
+            }
 
-            var adminUserId = await EnsureAdminUser(context, userManager);
+            await SeedContentDataAsync(defaultDataTypes);
+        }
+
+        /// <summary>
+        /// The DI-free half of <see cref="ApplyAllSeedData"/> (Database-Providers-Plan.md phase 2a.10): seeds
+        /// everything <see cref="ApplyAllSeedData"/> does except <see cref="EnsureAdminUser"/> - i.e.
+        /// <see cref="SeedConfigurations"/>, <see cref="SeedThemes"/>, <see cref="SeedWikiPages"/>,
+        /// <see cref="SeedFeatureTemplates"/>, <see cref="SeedMenuItems"/>, <see cref="SeedEmojiAndCategories"/>.
+        /// Takes only what it needs to open a <see cref="TightWikiDbContext"/> (nothing - it reuses
+        /// <see cref="CreateDbContext"/> like every other method here) and <paramref name="defaultDataTypes"/>;
+        /// deliberately does <b>not</b> take a <see cref="UserManager{TUser}"/>, so it is safe to call before
+        /// ASP.NET Core's DI container exists.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Exists because <c>Program.cs</c> constructs <c>WikiConfigurationManager</c> before
+        /// <c>WebApplicationBuilder.Build()</c>, and that constructor eagerly reads Config.Theme
+        /// (<c>WikiConfigurationManager.ReloadAll</c>: <c>.Single(o => o.Name == themeName)</c>) - which is empty
+        /// on a freshly migrated-but-unseeded MSSQL database (unlike SQLite, where Config.Theme ships pre-seeded
+        /// inside the shipped <c>config.db</c> file), crashing the app with "Sequence contains no matching
+        /// element" before Kestrel ever starts listening. <c>Program.cs</c> calls this method directly (via an
+        /// explicit cast to <see cref="SqlServerDatabaseManager"/> - it is intentionally not part of
+        /// <see cref="ITwDatabaseManager"/>) right after <see cref="InitializeSchema"/>, gated on the same
+        /// "was the schema just upgraded" condition as the later <see cref="ApplyAllSeedData"/> call, specifically
+        /// so Config.Theme (and the rest of this method's sections) exist by the time
+        /// <c>WikiConfigurationManager</c> is constructed.
+        /// </para>
+        /// <para>
+        /// Because no <see cref="UserManager{TUser}"/> is available yet at that point in <c>Program.cs</c>, this
+        /// method cannot create the admin user itself. Instead of skipping <see cref="SeedWikiPages"/> outright,
+        /// it looks up whatever admin <see cref="Users.Profile"/> row already exists (there is none on the very
+        /// first, pre-<c>Build()</c> call) and only seeds wiki pages if one is found. The later, post-<c>Build()</c>
+        /// call to <see cref="ApplyAllSeedData"/> (<c>Program.cs</c>, inside <c>app.Services.CreateScope()</c>)
+        /// runs <see cref="EnsureAdminUser"/> first and then calls this method again - by then the admin profile
+        /// exists, so that second call is what actually seeds wiki pages; every other section it repeats
+        /// (Configurations, Themes, FeatureTemplates, MenuItems, Emoji) is a no-op the second time, per this
+        /// method's idempotency (see <see cref="ApplyAllSeedData"/>'s remarks).
+        /// </para>
+        /// </remarks>
+        public async Task SeedContentDataAsync(TwDefaultDataType[] defaultDataTypes)
+        {
+            using var context = CreateDbContext();
 
             if (defaultDataTypes.Contains(TwDefaultDataType.Configurations))
             {
@@ -225,7 +277,8 @@ namespace TightWiki.Data.EfCore.SqlServer
                 await SeedThemes(context);
             }
 
-            if (adminUserId != null)
+            var adminProfile = await context.Profiles.FirstOrDefaultAsync(p => p.AccountName == "admin");
+            if (adminProfile != null)
             {
                 var namespaces = new List<string>();
                 if (defaultDataTypes.Contains(TwDefaultDataType.HelpPages)) namespaces.Add("Wiki Help");
@@ -234,7 +287,7 @@ namespace TightWiki.Data.EfCore.SqlServer
 
                 if (namespaces.Count > 0)
                 {
-                    await SeedWikiPages(context, namespaces, adminUserId.Value);
+                    await SeedWikiPages(context, namespaces, adminProfile.UserId);
                 }
             }
 
@@ -243,8 +296,8 @@ namespace TightWiki.Data.EfCore.SqlServer
                 await SeedFeatureTemplates(context);
             }
 
-            //No TwDefaultDataType flag exists for these three - see the remarks above on why they are always
-            //seeded rather than gated.
+            //No TwDefaultDataType flag exists for these three - see the remarks on ApplyAllSeedData above on why
+            //they are always seeded rather than gated.
             await SeedMenuItems(context);
             await SeedEmojiAndCategories(context);
         }
