@@ -31,11 +31,12 @@ namespace TightWiki.Data.EfCore.SqlServer
     /// <see cref="DefaultsRepository"/>, every <see cref="ISpannedRepository"/> member (phase 2a.4 - vendor-native
     /// MSSQL maintenance operations, Database-Providers-Plan.md chapter 4.4), <see cref="ConfigurationRepository"/>
     /// (phase 2a.6 - <see cref="EfConfigurationRepository"/>), <see cref="LoggingRepository"/> (phase 2a.7 -
-    /// <see cref="EfLoggingRepository"/>) and <see cref="EmojiRepository"/> (phase 2a.8 -
-    /// <see cref="EfEmojiRepository"/>) - all provider-agnostic LINQ living in the shared
-    /// <c>TightWiki.Data.EfCore</c> project rather than here, see each class's doc comment - are real. The
-    /// remaining three business repositories are still stubs that throw <see cref="NotImplementedException"/> until
-    /// phases 2a.9/2b land.
+    /// <see cref="EfLoggingRepository"/>), <see cref="EmojiRepository"/> (phase 2a.8 - <see cref="EfEmojiRepository"/>)
+    /// and <see cref="StatisticsRepository"/> (phase 2a.9 - <see cref="EfStatisticsRepository"/>) - all
+    /// provider-agnostic LINQ living in the shared <c>TightWiki.Data.EfCore</c> project rather than here, see each
+    /// class's doc comment - are real. The remaining two business repositories (<see cref="PageRepository"/>,
+    /// <see cref="UsersRepository"/>) are still stubs that throw <see cref="NotImplementedException"/> until
+    /// phase 2b lands.
     /// </remarks>
     public class SqlServerDatabaseManager : ITwDatabaseManager, ISpannedRepository
     {
@@ -63,7 +64,7 @@ namespace TightWiki.Data.EfCore.SqlServer
         public SqlServerPageRepository PageRepository { get; private set; }
         ITwPageRepository ITwDatabaseManager.PageRepository => PageRepository;
 
-        public SqlServerStatisticsRepository StatisticsRepository { get; private set; }
+        public EfStatisticsRepository StatisticsRepository { get; private set; }
         ITwStatisticsRepository ITwDatabaseManager.StatisticsRepository => StatisticsRepository;
 
         public SqlServerUsersRepository UsersRepository { get; private set; }
@@ -94,7 +95,7 @@ namespace TightWiki.Data.EfCore.SqlServer
 
             EmojiRepository = new EfEmojiRepository(CreateDbContext, ConfigurationRepository);
             PageRepository = new SqlServerPageRepository();
-            StatisticsRepository = new SqlServerStatisticsRepository();
+            StatisticsRepository = new EfStatisticsRepository(CreateDbContext, ConfigurationRepository);
             UsersRepository = new SqlServerUsersRepository();
         }
 
