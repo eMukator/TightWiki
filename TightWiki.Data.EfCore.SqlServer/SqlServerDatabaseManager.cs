@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System.Data.Common;
+using TightWiki.Data.EfCore.Repositories;
 using TightWiki.Data.EfCore.Seeding;
 using TightWiki.Data.EfCore.SqlServer.Repositories;
 using TightWiki.Library;
@@ -27,10 +28,12 @@ namespace TightWiki.Data.EfCore.SqlServer
     /// </summary>
     /// <remarks>
     /// <see cref="InitializeSchema"/>, its <c>ApplicationDbContext</c>/<c>TightWikiDbContext</c> migrations,
-    /// <see cref="DefaultsRepository"/>, and every <see cref="ISpannedRepository"/> member (phase 2a.4 - vendor-native
-    /// MSSQL maintenance operations, Database-Providers-Plan.md chapter 4.4) are real. The six business
-    /// repositories (<see cref="ConfigurationRepository"/> and friends) are still stubs that throw
-    /// <see cref="NotImplementedException"/> until phases 2a.6-2a.9/2b land.
+    /// <see cref="DefaultsRepository"/>, every <see cref="ISpannedRepository"/> member (phase 2a.4 - vendor-native
+    /// MSSQL maintenance operations, Database-Providers-Plan.md chapter 4.4), and <see cref="ConfigurationRepository"/>
+    /// (phase 2a.6 - <see cref="EfConfigurationRepository"/>, provider-agnostic LINQ living in the shared
+    /// <c>TightWiki.Data.EfCore</c> project rather than here, see that class's doc comment) are real. The remaining
+    /// five business repositories are still stubs that throw <see cref="NotImplementedException"/> until phases
+    /// 2a.7-2a.9/2b land.
     /// </remarks>
     public class SqlServerDatabaseManager : ITwDatabaseManager, ISpannedRepository
     {
@@ -41,7 +44,7 @@ namespace TightWiki.Data.EfCore.SqlServer
         /// </summary>
         public ILogger Logger { get; private set; }
 
-        public SqlServerConfigurationRepository ConfigurationRepository { get; private set; }
+        public EfConfigurationRepository ConfigurationRepository { get; private set; }
         ITwConfigurationRepository ITwDatabaseManager.ConfigurationRepository => ConfigurationRepository;
 
         public EfDefaultsRepository DefaultsRepository { get; private set; }
@@ -76,7 +79,7 @@ namespace TightWiki.Data.EfCore.SqlServer
                 ?? throw new InvalidOperationException(
                     "Missing connection string 'ConnectionStrings:TightWikiEfCore', which is required when built with -p:DataProvider=SqlServer.");
 
-            ConfigurationRepository = new SqlServerConfigurationRepository();
+            ConfigurationRepository = new EfConfigurationRepository(CreateDbContext, CreateApplicationDbContext);
             DefaultsRepository = new EfDefaultsRepository();
             EmojiRepository = new SqlServerEmojiRepository();
             LoggingRepository = new SqlServerLoggingRepository();
