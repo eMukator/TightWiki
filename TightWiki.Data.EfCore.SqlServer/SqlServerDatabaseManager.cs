@@ -29,18 +29,21 @@ namespace TightWiki.Data.EfCore.SqlServer
     /// <remarks>
     /// <see cref="InitializeSchema"/>, its <c>ApplicationDbContext</c>/<c>TightWikiDbContext</c> migrations,
     /// <see cref="DefaultsRepository"/>, every <see cref="ISpannedRepository"/> member (phase 2a.4 - vendor-native
-    /// MSSQL maintenance operations, Database-Providers-Plan.md chapter 4.4), and <see cref="ConfigurationRepository"/>
-    /// (phase 2a.6 - <see cref="EfConfigurationRepository"/>, provider-agnostic LINQ living in the shared
-    /// <c>TightWiki.Data.EfCore</c> project rather than here, see that class's doc comment) are real. The remaining
-    /// five business repositories are still stubs that throw <see cref="NotImplementedException"/> until phases
-    /// 2a.7-2a.9/2b land.
+    /// MSSQL maintenance operations, Database-Providers-Plan.md chapter 4.4), <see cref="ConfigurationRepository"/>
+    /// (phase 2a.6 - <see cref="EfConfigurationRepository"/>) and <see cref="LoggingRepository"/> (phase 2a.7 -
+    /// <see cref="EfLoggingRepository"/>) - both provider-agnostic LINQ living in the shared
+    /// <c>TightWiki.Data.EfCore</c> project rather than here, see each class's doc comment - are real. The
+    /// remaining four business repositories are still stubs that throw <see cref="NotImplementedException"/> until
+    /// phases 2a.8-2a.9/2b land.
     /// </remarks>
     public class SqlServerDatabaseManager : ITwDatabaseManager, ISpannedRepository
     {
         /// <summary>
-        /// See <see cref="ITwDatabaseManager.Logger"/>. Always a plain console logger for now - unlike the SQLite
-        /// <c>DatabaseManager</c>, there is no working <see cref="ITwLoggingRepository"/> yet to promote to a
-        /// database-backed logger (see <see cref="LoggingRepository"/>).
+        /// See <see cref="ITwDatabaseManager.Logger"/>. A plain console logger until <see cref="LoggingRepository"/>
+        /// (phase 2a.7 - <see cref="EfLoggingRepository"/>) is constructed, then promoted to
+        /// <see cref="TightWiki.Library.DatabaseLogger"/> - same two-stage bootstrap as the SQLite
+        /// <c>DatabaseManager</c> (<c>TightWiki.Repository/Helpers/DatabaseManager.cs</c>: "We expose this here
+        /// because it is the earliest we can prop up a database logger").
         /// </summary>
         public ILogger Logger { get; private set; }
 
@@ -53,7 +56,7 @@ namespace TightWiki.Data.EfCore.SqlServer
         public SqlServerEmojiRepository EmojiRepository { get; private set; }
         ITwEmojiRepository ITwDatabaseManager.EmojiRepository => EmojiRepository;
 
-        public SqlServerLoggingRepository LoggingRepository { get; private set; }
+        public EfLoggingRepository LoggingRepository { get; private set; }
         ITwLoggingRepository ITwDatabaseManager.LoggingRepository => LoggingRepository;
 
         public SqlServerPageRepository PageRepository { get; private set; }
@@ -81,8 +84,14 @@ namespace TightWiki.Data.EfCore.SqlServer
 
             ConfigurationRepository = new EfConfigurationRepository(CreateDbContext, CreateApplicationDbContext);
             DefaultsRepository = new EfDefaultsRepository();
+
+            LoggingRepository = new EfLoggingRepository(CreateDbContext, ConfigurationRepository);
+
+            //Same two-stage bootstrap as the SQLite DatabaseManager - see the doc comment on Logger.
+            var minimumLogLevel = Enum.Parse<LogLevel>(configuration.GetValue("EventLogLevel", LogLevel.Information.ToString()));
+            Logger = new TightWiki.Library.DatabaseLogger(LoggingRepository, minimumLogLevel);
+
             EmojiRepository = new SqlServerEmojiRepository();
-            LoggingRepository = new SqlServerLoggingRepository();
             PageRepository = new SqlServerPageRepository();
             StatisticsRepository = new SqlServerStatisticsRepository();
             UsersRepository = new SqlServerUsersRepository();
