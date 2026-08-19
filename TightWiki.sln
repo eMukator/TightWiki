@@ -51,6 +51,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TightWiki.SharedResources",
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TightWiki.Data.EfCore", "TightWiki.Data.EfCore\TightWiki.Data.EfCore.csproj", "{38EA6523-B1DD-437C-AFA4-4538535554B2}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TightWiki.Data.EfCore.SqlServer", "TightWiki.Data.EfCore.SqlServer\TightWiki.Data.EfCore.SqlServer.csproj", "{542ACA95-0FA2-4484-AF99-3A1C90DEB95A}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -253,6 +255,18 @@ Global
 		{38EA6523-B1DD-437C-AFA4-4538535554B2}.Release|x64.Build.0 = Release|Any CPU
 		{38EA6523-B1DD-437C-AFA4-4538535554B2}.Release|x86.ActiveCfg = Release|Any CPU
 		{38EA6523-B1DD-437C-AFA4-4538535554B2}.Release|x86.Build.0 = Release|Any CPU
+		{542ACA95-0FA2-4484-AF99-3A1C90DEB95A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{542ACA95-0FA2-4484-AF99-3A1C90DEB95A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{542ACA95-0FA2-4484-AF99-3A1C90DEB95A}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{542ACA95-0FA2-4484-AF99-3A1C90DEB95A}.Debug|x64.Build.0 = Debug|Any CPU
+		{542ACA95-0FA2-4484-AF99-3A1C90DEB95A}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{542ACA95-0FA2-4484-AF99-3A1C90DEB95A}.Debug|x86.Build.0 = Debug|Any CPU
+		{542ACA95-0FA2-4484-AF99-3A1C90DEB95A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{542ACA95-0FA2-4484-AF99-3A1C90DEB95A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{542ACA95-0FA2-4484-AF99-3A1C90DEB95A}.Release|x64.ActiveCfg = Release|Any CPU
+		{542ACA95-0FA2-4484-AF99-3A1C90DEB95A}.Release|x64.Build.0 = Release|Any CPU
+		{542ACA95-0FA2-4484-AF99-3A1C90DEB95A}.Release|x86.ActiveCfg = Release|Any CPU
+		{542ACA95-0FA2-4484-AF99-3A1C90DEB95A}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -273,6 +287,7 @@ Global
 		{3283A2E9-CFA1-23A3-2760-F54E3B94E8BC} = {FFE90C6C-7859-444B-8644-6CA12FA75B7D}
 		{943545CB-3D84-4BB7-A892-8A53607A49BD} = {66FB66E3-739C-44E8-B692-B714F41C3641}
 		{38EA6523-B1DD-437C-AFA4-4538535554B2} = {66FB66E3-739C-44E8-B692-B714F41C3641}
+		{542ACA95-0FA2-4484-AF99-3A1C90DEB95A} = {66FB66E3-739C-44E8-B692-B714F41C3641}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {3299E570-76FA-4831-9150-C1CCF4CB50E0}

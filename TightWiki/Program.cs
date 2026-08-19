@@ -1,6 +1,8 @@
 using Autofac;
 using Autofac.Extensions.DependencyInjection;
+#if SQLITE_PROVIDER
 using Dapper;
+#endif
 using DiffPlex;
 using DiffPlex.DiffBuilder;
 using Microsoft.AspNetCore.Authentication.OAuth;
@@ -12,7 +14,9 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using NTDLS.Helpers;
+#if SQLITE_PROVIDER
 using NTDLS.SqliteDapperWrapper;
+#endif
 using TightWiki.Engine;
 using TightWiki.Library;
 using TightWiki.Library.Dummy;
@@ -22,6 +26,8 @@ using TightWiki.Plugin.Interfaces;
 using TightWiki.Plugin.Interfaces.Repository;
 #if SQLITE_PROVIDER
 using TightWiki.Repository.Helpers;
+#elif SQLSERVER_PROVIDER
+using TightWiki.Data.EfCore.SqlServer;
 #endif
 using TightWiki.Translations;
 using static TightWiki.Plugin.TwConstants;
@@ -40,6 +46,8 @@ namespace TightWiki
 
 #if SQLITE_PROVIDER
             ITwDatabaseManager databaseManager = new DatabaseManager(builder.Configuration);
+#elif SQLSERVER_PROVIDER
+            ITwDatabaseManager databaseManager = new SqlServerDatabaseManager(builder.Configuration);
 #endif
             bool wasDatabaseUpgraded = await databaseManager.InitializeSchema();
 
@@ -49,8 +57,14 @@ namespace TightWiki
             builder.Logging.ClearProviders();
             builder.Logging.AddProvider(new DatabaseLoggerProvider(databaseManager.LoggingRepository, minimumLogLevel));
 
+#if SQLITE_PROVIDER
+            //ASP.NET Identity currently only follows the SQLite driver (Database-Providers-Plan.md chapter 4.1.1 -
+            //"stejná databáze, schéma Users" - is not implemented yet; that is scoped to task 2a.2, together with
+            //ApplicationDbContext's own EF Core migrations). Under -p:DataProvider=SqlServer, ApplicationDbContext
+            //is intentionally left unregistered for now.
             var userConnectionString = GetIdentityConnectionString(builder.Configuration);
             builder.Services.AddDbContext<ApplicationDbContext>(options => options.UseSqlite(userConnectionString));
+#endif
 
             var wikiConfigurationManager = new WikiConfigurationManager(builder.Configuration, databaseManager);
 
@@ -406,6 +420,7 @@ namespace TightWiki
             return true;
         }
 
+#if SQLITE_PROVIDER
         /// <summary>
         /// Derives the SQLite connection string for the users database (used to configure ASP.NET Core
         /// Identity's <see cref="ApplicationDbContext"/>) directly from configuration, using the same
@@ -425,5 +440,6 @@ namespace TightWiki
 
             return new SqliteManagedFactory(usersConnectionString).Ephemeral(o => o.NativeConnection.ConnectionString);
         }
+#endif
     }
 }

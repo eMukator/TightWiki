@@ -155,6 +155,10 @@ TightWiki.Data.EfCore/bin/
 
 TightWiki.Data.EfCore/obj/
 
+TightWiki.Data.EfCore.SqlServer/bin/
+
+TightWiki.Data.EfCore.SqlServer/obj/
+
 _tools/SchemaUpgradeTool/bin/
 
 _tools/SchemaUpgradeTool/obj/
