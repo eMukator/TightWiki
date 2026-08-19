@@ -30,11 +30,12 @@ namespace TightWiki.Data.EfCore.SqlServer
     /// <see cref="InitializeSchema"/>, its <c>ApplicationDbContext</c>/<c>TightWikiDbContext</c> migrations,
     /// <see cref="DefaultsRepository"/>, every <see cref="ISpannedRepository"/> member (phase 2a.4 - vendor-native
     /// MSSQL maintenance operations, Database-Providers-Plan.md chapter 4.4), <see cref="ConfigurationRepository"/>
-    /// (phase 2a.6 - <see cref="EfConfigurationRepository"/>) and <see cref="LoggingRepository"/> (phase 2a.7 -
-    /// <see cref="EfLoggingRepository"/>) - both provider-agnostic LINQ living in the shared
+    /// (phase 2a.6 - <see cref="EfConfigurationRepository"/>), <see cref="LoggingRepository"/> (phase 2a.7 -
+    /// <see cref="EfLoggingRepository"/>) and <see cref="EmojiRepository"/> (phase 2a.8 -
+    /// <see cref="EfEmojiRepository"/>) - all provider-agnostic LINQ living in the shared
     /// <c>TightWiki.Data.EfCore</c> project rather than here, see each class's doc comment - are real. The
-    /// remaining four business repositories are still stubs that throw <see cref="NotImplementedException"/> until
-    /// phases 2a.8-2a.9/2b land.
+    /// remaining three business repositories are still stubs that throw <see cref="NotImplementedException"/> until
+    /// phases 2a.9/2b land.
     /// </remarks>
     public class SqlServerDatabaseManager : ITwDatabaseManager, ISpannedRepository
     {
@@ -53,7 +54,7 @@ namespace TightWiki.Data.EfCore.SqlServer
         public EfDefaultsRepository DefaultsRepository { get; private set; }
         ITwDefaultsRepository ITwDatabaseManager.DefaultsRepository => DefaultsRepository;
 
-        public SqlServerEmojiRepository EmojiRepository { get; private set; }
+        public EfEmojiRepository EmojiRepository { get; private set; }
         ITwEmojiRepository ITwDatabaseManager.EmojiRepository => EmojiRepository;
 
         public EfLoggingRepository LoggingRepository { get; private set; }
@@ -91,7 +92,7 @@ namespace TightWiki.Data.EfCore.SqlServer
             var minimumLogLevel = Enum.Parse<LogLevel>(configuration.GetValue("EventLogLevel", LogLevel.Information.ToString()));
             Logger = new TightWiki.Library.DatabaseLogger(LoggingRepository, minimumLogLevel);
 
-            EmojiRepository = new SqlServerEmojiRepository();
+            EmojiRepository = new EfEmojiRepository(CreateDbContext, ConfigurationRepository);
             PageRepository = new SqlServerPageRepository();
             StatisticsRepository = new SqlServerStatisticsRepository();
             UsersRepository = new SqlServerUsersRepository();
