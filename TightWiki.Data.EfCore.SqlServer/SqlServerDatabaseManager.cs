@@ -4,6 +4,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using TightWiki.Data.EfCore.Seeding;
 using TightWiki.Data.EfCore.SqlServer.Repositories;
+using TightWiki.Library;
 using TightWiki.Plugin;
 using TightWiki.Plugin.Interfaces;
 using TightWiki.Plugin.Interfaces.Repository;
@@ -17,9 +18,10 @@ namespace TightWiki.Data.EfCore.SqlServer
     /// when built with <c>-p:DataProvider=SqlServer</c> (<c>SQLSERVER_PROVIDER</c>).
     /// </summary>
     /// <remarks>
-    /// Phase 2a.1 skeleton only (Database-Providers-Plan.md, phase 2a). <see cref="InitializeSchema"/> and
-    /// <see cref="DefaultsRepository"/> are real; the six business repositories and every <see cref="ISpannedRepository"/>
-    /// member are stubs that throw <see cref="NotImplementedException"/> until phases 2a.4/2a.6-2a.9/2b land.
+    /// Phase 2a.1/2a.2 skeleton (Database-Providers-Plan.md, phase 2a). <see cref="InitializeSchema"/>, its
+    /// <c>ApplicationDbContext</c>/<c>TightWikiDbContext</c> migrations, and <see cref="DefaultsRepository"/> are
+    /// real; the six business repositories and every <see cref="ISpannedRepository"/> member are stubs that
+    /// throw <see cref="NotImplementedException"/> until phases 2a.4/2a.6-2a.9/2b land.
     /// </remarks>
     public class SqlServerDatabaseManager : ITwDatabaseManager, ISpannedRepository
     {
@@ -81,29 +83,67 @@ namespace TightWiki.Data.EfCore.SqlServer
         private TightWikiDbContext CreateDbContext()
         {
             var optionsBuilder = new DbContextOptionsBuilder<TightWikiDbContext>();
-            optionsBuilder.UseSqlServer(_connectionString);
+            //See the matching comment in TightWikiDbContextFactory - migrations for this shared context live in
+            //this driver project's assembly, not TightWiki.Data.EfCore's, and its MigrationsHistoryTable is
+            //explicit and distinct from ApplicationDbContext's (SqlServerMigrationsHistory).
+            optionsBuilder.UseSqlServer(_connectionString,
+                b => b.MigrationsAssembly(typeof(SqlServerDatabaseManager).Assembly.GetName().Name)
+                      .MigrationsHistoryTable(SqlServerMigrationsHistory.TightWikiDbTableName));
             return new TightWikiDbContext(optionsBuilder.Options);
+        }
+
+        /// <summary>
+        /// Creates a new <see cref="ApplicationDbContext"/> (ASP.NET Core Identity, Database-Providers-Plan.md
+        /// chapter 4.1.1) configured against the same MSSQL connection string as <see cref="CreateDbContext"/>.
+        /// Callers are responsible for disposing the returned context.
+        /// </summary>
+        private ApplicationDbContext CreateApplicationDbContext()
+        {
+            var optionsBuilder = new DbContextOptionsBuilder<ApplicationDbContext>();
+            //See the matching comment in ApplicationDbContextFactory - migrations for this shared context live
+            //in this driver project's assembly, not TightWiki.Library's, and its MigrationsHistoryTable is
+            //explicit and distinct from TightWikiDbContext's (SqlServerMigrationsHistory).
+            optionsBuilder.UseSqlServer(_connectionString,
+                b => b.MigrationsAssembly(typeof(SqlServerDatabaseManager).Assembly.GetName().Name)
+                      .MigrationsHistoryTable(SqlServerMigrationsHistory.ApplicationDbTableName, SqlServerMigrationsHistory.ApplicationDbSchema));
+            return new ApplicationDbContext(optionsBuilder.Options);
         }
 
         /// <summary>
         /// EF Core implementation of <see cref="ITwDatabaseManager.InitializeSchema"/>: applies any pending EF Core
         /// migrations via <see cref="Microsoft.EntityFrameworkCore.RelationalDatabaseFacadeExtensions.MigrateAsync"/>
-        /// (Database-Providers-Plan.md chapter 4.2). No migrations exist yet as of phase 2a.1 (they land in
-        /// phase 2a.2), so this currently always finds zero pending migrations and returns false - the same "no
-        /// pending changes" outcome it will report once migrations exist and are already applied.
+        /// (Database-Providers-Plan.md chapter 4.2).
         /// </summary>
+        /// <remarks>
+        /// <see cref="ApplicationDbContext"/> (Identity) migrations are applied first, then
+        /// <see cref="TightWikiDbContext"/>'s - per chapter 4.1.1 ("Migrace ApplicationDbContext musí běžet před
+        /// migracemi TightWiki modelu") and the open question in chapter 8. Note that in the EF model itself
+        /// <c>Users.Profile.UserId</c> is <b>not</b> a declared foreign key against <c>AspNetUsers.Id</c> - see
+        /// the remarks on <c>Entities.Users.Profile</c> - it is only a logical/matching-by-convention link,
+        /// because the two tables live in separate <see cref="Microsoft.EntityFrameworkCore.DbContext"/>s and EF
+        /// Core cannot declare a cross-context FK constraint. So this ordering is not enforced by any FK EF would
+        /// otherwise fail to create; it is kept anyway both because the plan calls for it and because it is the
+        /// only sane bootstrap order (an application with no Identity tables yet has no users to run as).
+        /// </remarks>
         public async Task<bool> InitializeSchema()
         {
-            using var context = CreateDbContext();
-
-            var pendingMigrations = await context.Database.GetPendingMigrationsAsync();
-            if (!pendingMigrations.Any())
+            using var identityContext = CreateApplicationDbContext();
+            var identityPendingMigrations = await identityContext.Database.GetPendingMigrationsAsync();
+            var wasIdentitySchemaUpgraded = identityPendingMigrations.Any();
+            if (wasIdentitySchemaUpgraded)
             {
-                return false;
+                await identityContext.Database.MigrateAsync();
             }
 
-            await context.Database.MigrateAsync();
-            return true;
+            using var context = CreateDbContext();
+            var pendingMigrations = await context.Database.GetPendingMigrationsAsync();
+            var wasWikiSchemaUpgraded = pendingMigrations.Any();
+            if (wasWikiSchemaUpgraded)
+            {
+                await context.Database.MigrateAsync();
+            }
+
+            return wasIdentitySchemaUpgraded || wasWikiSchemaUpgraded;
         }
 
         /// <summary>

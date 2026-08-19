@@ -58,12 +58,23 @@ namespace TightWiki
             builder.Logging.AddProvider(new DatabaseLoggerProvider(databaseManager.LoggingRepository, minimumLogLevel));
 
 #if SQLITE_PROVIDER
-            //ASP.NET Identity currently only follows the SQLite driver (Database-Providers-Plan.md chapter 4.1.1 -
-            //"stejná databáze, schéma Users" - is not implemented yet; that is scoped to task 2a.2, together with
-            //ApplicationDbContext's own EF Core migrations). Under -p:DataProvider=SqlServer, ApplicationDbContext
-            //is intentionally left unregistered for now.
             var userConnectionString = GetIdentityConnectionString(builder.Configuration);
             builder.Services.AddDbContext<ApplicationDbContext>(options => options.UseSqlite(userConnectionString));
+#elif SQLSERVER_PROVIDER
+            //ASP.NET Identity follows the same driver as the rest of the EF model (Database-Providers-Plan.md
+            //chapter 4.1.1 - "stejná databáze, schéma Users"): same ConnectionStrings:TightWikiEfCore connection
+            //string and same provider as SqlServerDatabaseManager/TightWikiDbContext.
+            var efCoreConnectionString = builder.Configuration.GetConnectionString("TightWikiEfCore")
+                ?? throw new InvalidOperationException(
+                    "Missing connection string 'ConnectionStrings:TightWikiEfCore', which is required when built with -p:DataProvider=SqlServer.");
+            //MigrationsAssembly points at TightWiki.Data.EfCore.SqlServer - see the matching comment on
+            //SqlServerDatabaseManager.CreateApplicationDbContext, which applies these same migrations at startup.
+            //MigrationsHistoryTable is likewise explicit and distinct from TightWikiDbContext's - see
+            //SqlServerMigrationsHistory for why two DbContexts over one database must not share EF Core's
+            //default dbo.__EFMigrationsHistory table.
+            builder.Services.AddDbContext<ApplicationDbContext>(options => options.UseSqlServer(efCoreConnectionString,
+                b => b.MigrationsAssembly("TightWiki.Data.EfCore.SqlServer")
+                      .MigrationsHistoryTable(SqlServerMigrationsHistory.ApplicationDbTableName, SqlServerMigrationsHistory.ApplicationDbSchema)));
 #endif
 
             var wikiConfigurationManager = new WikiConfigurationManager(builder.Configuration, databaseManager);

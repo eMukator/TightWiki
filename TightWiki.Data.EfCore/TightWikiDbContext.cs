@@ -120,6 +120,46 @@ namespace TightWiki.Data.EfCore
             base.OnModelCreating(modelBuilder);
 
             modelBuilder.ApplyConfigurationsFromAssembly(typeof(TightWikiDbContext).Assembly);
+
+            StripNonSqliteNoCaseCollation(modelBuilder);
+        }
+
+        /// <summary>
+        /// Every <see cref="Microsoft.EntityFrameworkCore.Metadata.Builders.IEntityTypeConfiguration{TEntity}"/>
+        /// under <c>Configurations/</c> unconditionally calls <c>.UseCollation("NOCASE")</c> on the columns that
+        /// carry SQLite's case-insensitive collation today - that stays a correct, literal port for a future
+        /// SQLite-EF driver (Database-Providers-Plan.md chapter 4.5: "Kolace - .UseCollation("NOCASE") je
+        /// legitimní volba i pro SQLite provider"). But <c>NOCASE</c> is a SQLite-only collation name - it does
+        /// not exist on SQL Server/Postgres, and a migration/runtime call would fail there.
+        /// </summary>
+        /// <remarks>
+        /// Per chapter 4.4 ("MSSQL má CI collation obvykle jako DB default") and the open question in chapter 8,
+        /// the chosen approach for non-SQLite providers is to <b>not</b> set an explicit collation at all and
+        /// rely on the server/database default collation being case-insensitive (LocalDB and a stock SQL Server
+        /// install both default to <c>SQL_Latin1_General_CP1_CI_AS</c>). Rather than sprinkling per-provider
+        /// checks across ~30 configuration files (one per entity), the switch is centralized here: every
+        /// <c>NOCASE</c> collation applied above is stripped again unless the active provider is SQLite. This
+        /// is deliberately phrased as "keep it only for Sqlite", not "strip it for SqlServer" - so a future
+        /// Postgres driver (phase 3) inherits "no NOCASE" automatically and can layer its own citext/lower()
+        /// convention on top later without this method needing another provider-specific branch.
+        /// </remarks>
+        private void StripNonSqliteNoCaseCollation(ModelBuilder modelBuilder)
+        {
+            if (Database.ProviderName?.Contains("Sqlite", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                return; //SQLite (present or future TightWiki.Data.EfCore.Sqlite driver) keeps NOCASE as configured.
+            }
+
+            foreach (var entityType in modelBuilder.Model.GetEntityTypes())
+            {
+                foreach (var property in entityType.GetProperties())
+                {
+                    if (property.GetCollation() == "NOCASE")
+                    {
+                        property.SetCollation(null);
+                    }
+                }
+            }
         }
     }
 }

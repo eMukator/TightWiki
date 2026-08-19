@@ -32,7 +32,16 @@ namespace TightWiki.Data.EfCore.SqlServer
                     "'dotnet ef' commands against TightWiki.Data.EfCore.SqlServer.");
 
             var optionsBuilder = new DbContextOptionsBuilder<TightWikiDbContext>();
-            optionsBuilder.UseSqlServer(connectionString);
+            //TightWikiDbContext itself lives in TightWiki.Data.EfCore (shared with every EF driver project), but
+            //its SQL Server migrations belong in this driver project - MigrationsAssembly has to be pointed here
+            //explicitly, or "dotnet ef" defaults to (and "dotnet ef database update" at runtime would look for
+            //its __EFMigrationsHistory rows in) the context's own assembly.
+            //MigrationsHistoryTable is likewise explicit and distinct from ApplicationDbContext's - see
+            //SqlServerMigrationsHistory for why two DbContexts over one database must not share EF Core's
+            //default dbo.__EFMigrationsHistory table.
+            optionsBuilder.UseSqlServer(connectionString,
+                b => b.MigrationsAssembly(typeof(TightWikiDbContextFactory).Assembly.GetName().Name)
+                      .MigrationsHistoryTable(SqlServerMigrationsHistory.TightWikiDbTableName));
 
             return new TightWikiDbContext(optionsBuilder.Options);
         }
