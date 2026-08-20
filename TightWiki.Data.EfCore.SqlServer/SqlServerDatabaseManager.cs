@@ -306,27 +306,53 @@ namespace TightWiki.Data.EfCore.SqlServer
         }
 
         /// <summary>
-        /// Finds or creates the "admin" <see cref="IdentityUser"/> (mirroring the SQLite reference's inline
-        /// bootstrap in <c>DatabaseManager.ApplyAllSeedData</c>) together with its matching
-        /// <see cref="Users.Profile"/> row, so that <see cref="SeedWikiPages"/> has a valid
-        /// <see cref="Page.CreatedByUserId"/>/<c>ModifiedByUserId</c>. Returns null (logging the failure) if no
-        /// admin user could be found or created, in which case the caller skips wiki page seeding entirely -
+        /// Finds or creates the built-in admin <see cref="IdentityUser"/> (looked up/created by <see
+        /// cref="Constants.DEFAULTUSERNAME"/>, not the literal string <c>"admin"</c> - see remarks) together with
+        /// its matching <see cref="Users.Profile"/> row (still keyed on the literal <c>"admin"</c>
+        /// <see cref="Users.Profile.AccountName"/>/<see cref="Users.Profile.Navigation"/>, which is an independent,
+        /// TightWiki-owned value unrelated to the Identity username), so that <see cref="SeedWikiPages"/> has a
+        /// valid <see cref="Page.CreatedByUserId"/>/<c>ModifiedByUserId</c>. Returns null (logging the failure) if
+        /// no admin user could be found or created, in which case the caller skips wiki page seeding entirely -
         /// same fallback behavior as the SQLite reference.
         /// </summary>
+        /// <remarks>
+        /// The SQLite reference's inline bootstrap (<c>DatabaseManager.ApplyAllSeedData</c>) finds/creates the
+        /// Identity user by the literal username <c>"admin"</c> instead. This intentionally diverges from that:
+        /// this method runs (via <see cref="ApplyAllSeedData"/>) immediately before
+        /// <c>EfUsersRepository.ValidateEncryptionAndCreateAdminUserAsync</c> - called moments later from the same
+        /// <c>Program.cs</c> DI scope - which independently finds/creates the Identity user by
+        /// <see cref="Constants.DEFAULTUSERNAME"/> and then re-points the existing <c>Profile</c> row (keyed on
+        /// <see cref="Constants.DEFAULTACCOUNT"/>) at whatever id it resolved via <c>SetProfileUserId</c>. Under
+        /// SQL Server, looking this method's user up by the literal <c>"admin"</c> username would create a second,
+        /// distinct <see cref="IdentityUser"/> from the one <c>ValidateEncryptionAndCreateAdminUserAsync</c> later
+        /// finds/creates under <see cref="Constants.DEFAULTUSERNAME"/>, and re-pointing <c>Profile.UserId</c> from
+        /// this method's id to that one would violate the FK from every already-seeded
+        /// <see cref="Page.CreatedByUserId"/>/<c>ModifiedByUserId</c>/<c>PageRevision.ModifiedByUserId</c> (and
+        /// every other column referencing <c>Profile.UserId</c> across the <c>Pages</c>/<c>DeletedPages</c>/
+        /// <c>DeletedPageRevisions</c>/<c>Users</c> schemas) - an UPDATE of a primary key still referenced by
+        /// existing FK rows. Looking this method's user up by <see cref="Constants.DEFAULTUSERNAME"/> instead means
+        /// <c>ValidateEncryptionAndCreateAdminUserAsync</c>'s later <c>FindByNameAsync</c> finds the very same
+        /// Identity user this method already created, so its subsequent <c>SetProfileUserId</c> call is a no-op
+        /// UPDATE (new value == existing value) rather than a genuine repoint, and no FK violation occurs. This has
+        /// no SQLite-side equivalent to keep in sync with: the SQLite reference matches the admin
+        /// <see cref="Users.Profile"/> row by <c>Navigation</c>/<c>AccountName</c> (<c>GetAdminUserId.sql</c>), not
+        /// by Identity username, so it never re-points an existing profile's primary key the way the MSSQL/EF path
+        /// does.
+        /// </remarks>
         private async Task<Guid?> EnsureAdminUser(TightWikiDbContext context, UserManager<IdentityUser> userManager)
         {
             try
             {
                 Guid adminUserId;
 
-                var existingUser = await userManager.FindByNameAsync("admin");
+                var existingUser = await userManager.FindByNameAsync(Constants.DEFAULTUSERNAME);
                 if (existingUser != null)
                 {
                     adminUserId = Guid.Parse(existingUser.Id);
                 }
                 else
                 {
-                    var user = new IdentityUser { UserName = "admin" };
+                    var user = new IdentityUser { UserName = Constants.DEFAULTUSERNAME };
                     var result = await userManager.CreateAsync(user, PasswordGenerator.Generate(32));
                     if (!result.Succeeded)
                     {
