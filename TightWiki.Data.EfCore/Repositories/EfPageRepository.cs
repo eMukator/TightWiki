@@ -7,6 +7,8 @@ using TightWiki.Plugin;
 using TightWiki.Plugin.Interfaces;
 using TightWiki.Plugin.Interfaces.Repository;
 using TightWiki.Plugin.Models;
+using DeletedPagesEntities = TightWiki.Data.EfCore.Entities.DeletedPages;
+using DeletedPageRevisionsEntities = TightWiki.Data.EfCore.Entities.DeletedPageRevisions;
 using PagesEntities = TightWiki.Data.EfCore.Entities.Pages;
 using static TightWiki.Plugin.TwConstants;
 
@@ -23,8 +25,27 @@ namespace TightWiki.Data.EfCore.Repositories
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Still a partial skeleton (Database-Providers-Plan.md phase 2b.1-2b.7) - 15 of 86 members still throw
-    /// <see cref="NotImplementedException"/>. The first 11 (autocomplete, page-cache flushing, page comments,
+    /// Complete as of phase 2b.8 (Database-Providers-Plan.md) - all 86 interface members are implemented for
+    /// real; none throw <see cref="NotImplementedException"/> anymore. The final 15 - the most complex remaining
+    /// category, transactional row-moves between the Pages/DeletedPages/DeletedPageRevisions schemas plus two
+    /// small metadata-read leftovers - (<see cref="GetPageProcessingInstructionsByPageId"/>,
+    /// <see cref="GetPageTagsById"/>, <see cref="TruncateAllPageRevisions"/>,
+    /// <see cref="RestoreDeletedPageByPageId"/>, <see cref="MovePageRevisionToDeletedById"/>,
+    /// <see cref="MovePageToDeletedById"/>, <see cref="PurgeDeletedPageByPageId"/>, <see cref="PurgeDeletedPages"/>,
+    /// <see cref="GetDeletedPageById"/>, <see cref="GetDeletedPageRevisionsByIdPaged"/>,
+    /// <see cref="PurgeDeletedPageRevisions"/>, <see cref="PurgeDeletedPageRevisionsByPageId"/>,
+    /// <see cref="PurgeDeletedPageRevisionByPageIdAndRevision"/>,
+    /// <see cref="RestoreDeletedPageRevisionByPageIdAndRevision"/>, and <see cref="GetDeletedPageRevisionById"/> -
+    /// see <see cref="MovePageToDeletedById"/>'s and <see cref="RestoreDeletedPageByPageId"/>'s remarks for what
+    /// exactly gets copied/discarded on each side of a soft-delete/restore, and <see cref="PurgeDeletedPages"/>'s
+    /// remarks for a confirmed, deliberately-not-"fixed" asymmetry between the single-page and purge-all
+    /// reference scripts) landed in phase 2b.8, now that a single consolidated <see cref="TightWikiDbContext"/>
+    /// makes what used to be cross-database <c>ATTACH</c>-based row copies (Pages/DeletedPages/
+    /// DeletedPageRevisions are three separate physical SQLite files in the reference) a plain
+    /// read-then-insert-then-delete within one EF Core transaction.
+    /// </para>
+    /// <para>
+    /// The history of how the rest got here: the first 11 (autocomplete, page-cache flushing, page comments,
     /// current-page-editors) were implemented for real in phase 2b.2; a further 19 page/revision metadata-read
     /// members (<see cref="GetPageRevisionInfoById"/>, <see cref="GetPageNavigationByPageId"/>,
     /// <see cref="GetTopRecentlyModifiedPagesInfoByUserId"/>, <see cref="GetTopRecentlyModifiedPagesInfo"/>,
@@ -68,10 +89,8 @@ namespace TightWiki.Data.EfCore.Repositories
     /// remarks for the hash-based change detection/revision-bumping logic behind file attachments (structurally
     /// analogous to <see cref="SavePage"/>'s own page-revision logic), and
     /// <see cref="GetPageFileInfoByFileNavigation"/>/<see cref="GetPageCurrentRevisionAttachmentByFileNavigation"/>
-    /// for the two SQLite-only, non-interface helpers <c>UpsertPageFile</c> depends on) landed in phase 2b.7. Real
-    /// LINQ-based implementations of the rest (including the <c>TempTags</c>/<c>TempNamespaces</c>/
-    /// <c>TempInstructions</c> replacements discussed in chapter 4.4 that this phase's own tag/namespace/
-    /// reference/instruction methods didn't already cover) land across phases 2b.8-2b.13.
+    /// for the two SQLite-only, non-interface helpers <c>UpsertPageFile</c> depends on) landed in phase 2b.7. The
+    /// final 15 members landed in phase 2b.8 - see the opening paragraph above.
     /// </para>
     /// <para>
     /// Takes a <see cref="Func{TightWikiDbContext}"/> rather than an injected context instance, mirroring
@@ -180,11 +199,63 @@ namespace TightWiki.Data.EfCore.Repositories
                            }).SingleOrDefaultAsync();
         }
 
-        public Task<TwProcessingInstructionCollection> GetPageProcessingInstructionsByPageId(int pageId)
-            => throw new NotImplementedException();
+        /// <summary>
+        /// Mirrors GetPageProcessingInstructionsByPageId.sql: every Pages.PageProcessingInstruction row for
+        /// <paramref name="pageId"/>, wrapped in a <see cref="TwProcessingInstructionCollection"/>. Cached under
+        /// <see cref="MemCache.Category.Page"/>, same cache key shape (pageId) as the SQLite reference.
+        /// </summary>
+        public async Task<TwProcessingInstructionCollection> GetPageProcessingInstructionsByPageId(int pageId)
+        {
+            var cacheKey = MemCacheKeyFunction.Build(MemCache.Category.Page, [pageId]);
 
-        public Task<List<TwPageTag>> GetPageTagsById(int pageId)
-            => throw new NotImplementedException();
+            return (await MemCache.AddOrGetAsync(cacheKey, async () =>
+            {
+                using var context = _createContext();
+
+                var instructions = await context.Pages_PageProcessingInstructions
+                    .Where(pi => pi.PageId == pageId)
+                    .Select(pi => new TwProcessingInstruction
+                    {
+                        PageId = pi.PageId,
+                        Instruction = pi.Instruction,
+                    })
+                    .ToListAsync();
+
+                return new TwProcessingInstructionCollection
+                {
+                    Collection = instructions,
+                };
+            })).EnsureNotNull();
+        }
+
+        /// <summary>
+        /// Mirrors GetPageTagsById.sql: every Pages.PageTag row for <paramref name="pageId"/>.
+        /// <see cref="TwPageTag.Id"/>/<see cref="TwPageTag.PageId"/> are deliberately left unset (0) here - a
+        /// literal quirk of the reference script, which selects only <c>PT.Tag, PT.Navigation</c> (neither an Id
+        /// nor PageId column), and <see cref="TwPageTag"/> has no "Navigation" property for the second column to
+        /// land on either - the same "Dapper silently drops what it can't map, leaves what it never received at
+        /// its default" pattern as <see cref="AutoCompletePage"/>'s own doc comment. Confirmed to have no
+        /// observable behavioral impact: this method's one caller (<c>TwSessionState.RefreshAsync</c>) only reads
+        /// <see cref="TwPageTag.Tag"/> off the result. Cached under <see cref="MemCache.Category.Page"/>, same
+        /// cache key shape (pageId) as the SQLite reference.
+        /// </summary>
+        public async Task<List<TwPageTag>> GetPageTagsById(int pageId)
+        {
+            var cacheKey = MemCacheKeyFunction.Build(MemCache.Category.Page, [pageId]);
+
+            return (await MemCache.AddOrGetAsync(cacheKey, async () =>
+            {
+                using var context = _createContext();
+
+                return await context.Pages_PageTags
+                    .Where(t => t.PageId == pageId)
+                    .Select(t => new TwPageTag
+                    {
+                        Tag = t.Tag,
+                    })
+                    .ToListAsync();
+            })).EnsureNotNull();
+        }
 
         /// <summary>
         /// Mirrors GetPageRevisionsInfoByNavigationPaged.sql: every Pages.PageRevision row for the page matching
@@ -892,10 +963,11 @@ namespace TightWiki.Data.EfCore.Repositories
         /// same two <see cref="MemCache.ClearCategory(MemCacheKey)"/> calls as the SQLite reference. Unlike the
         /// reference, this resolves the page's navigation with a direct, local query (mirroring
         /// GetPageNavigationByPageId.sql itself) rather than calling the public
-        /// <see cref="GetPageNavigationByPageId"/> interface member, which - like the 74 other members of this
-        /// class not covered by phase 2b.2 - is still a <see cref="NotImplementedException"/> stub; several of
-        /// the methods implemented in phase 2b.2 (<see cref="InsertPageComment"/>, <see cref="DeletePageCommentById"/>,
-        /// <see cref="DeletePageCommentByUserAndId"/>) call this method and would otherwise always fail.
+        /// <see cref="GetPageNavigationByPageId"/> interface member - a historical artifact of phase 2b.2 (when
+        /// <see cref="GetPageNavigationByPageId"/> was still a <see cref="NotImplementedException"/> stub and
+        /// several of that phase's own methods, <see cref="InsertPageComment"/>/<see cref="DeletePageCommentById"/>/
+        /// <see cref="DeletePageCommentByUserAndId"/>, already called this method and would otherwise always have
+        /// failed), preserved as-is now that both are real: the two implementations are equivalent queries anyway.
         /// </summary>
         public async Task FlushPageCache(int pageId)
         {
@@ -1402,13 +1474,10 @@ namespace TightWiki.Data.EfCore.Repositories
         /// <c>TempInstructions</c> - phases 2b.5/2b.6).
         /// </para>
         /// <para>
-        /// Since <see cref="GetPageIdsByTokens"/> is still a <see cref="NotImplementedException"/> stub as of this
-        /// phase, calling it here means the <paramref name="searchTerms"/>-filtered path of this method currently
-        /// throws rather than returning filtered results - a known, documented limitation of phase 2b.4. The
-        /// no-<paramref name="searchTerms"/> path (the common case, and the one exercised by every existing
-        /// caller/test as of this phase) is fully functional. Once <see cref="GetPageIdsByTokens"/> is implemented
-        /// (phase 2b.5), this method's <paramref name="searchTerms"/> path starts working with no further changes
-        /// needed here.
+        /// <see cref="GetPageIdsByTokens"/> was still a <see cref="NotImplementedException"/> stub when this
+        /// method itself landed in phase 2b.4 - a known, documented limitation at the time, since resolved by
+        /// <see cref="GetPageIdsByTokens"/>'s own real implementation in phase 2b.5, with no further changes
+        /// needed here for the <paramref name="searchTerms"/>-filtered path to start working.
         /// </para>
         /// <para>
         /// Ordering mirrors <c>RepositoryHelpers.TransposeOrderby</c> against the scripts' shared <c>--CONFIG::</c>
@@ -1846,8 +1915,92 @@ namespace TightWiki.Data.EfCore.Repositories
             await transaction.CommitAsync();
         }
 
-        public Task TruncateAllPageRevisions(string confirm)
-            => throw new NotImplementedException();
+        /// <summary>
+        /// Mirrors TruncateAllPageRevisions.sql: for every page, permanently deletes every Pages.PageRevision/
+        /// Pages.PageRevisionAttachment/Pages.PageFileRevision row except the one representing that page's
+        /// current revision/file-revision, then purges whatever Pages.PageFileRevision/Pages.PageFile rows are
+        /// left with no remaining Pages.PageRevisionAttachment reference at all, then resets every remaining
+        /// Revision/PageRevision/FileRevision counter (on Pages.Page/Pages.PageRevision/Pages.PageRevisionAttachment/
+        /// Pages.PageFileRevision/Pages.PageFile) back to 1 - i.e. every page is left with exactly one revision
+        /// (renumbered 1), and every attachment still carries whatever its single surviving file revision was
+        /// (also renumbered 1). A no-op unless <paramref name="confirm"/> is exactly "YES" (same guard as the
+        /// SQLite reference - "Are you REALLY sure?"). One transaction, matching the SQLite reference's own
+        /// <c>o.BeginTransaction()</c>/<c>Commit()</c>/<c>Rollback()</c>.
+        /// </summary>
+        /// <remarks>
+        /// The reference script identifies "the current revision/file-revision to keep" via its own
+        /// <c>GROUP BY ... MAX(Revision)</c> subqueries, re-evaluated fresh (against the then-current, shrinking
+        /// table contents) before each of its four DELETE statements. This instead resolves "current" the same
+        /// way <see cref="GetPageFilesInfoByPageNavigationAndPageRevisionPaged"/>'s own "--Latest file revision."
+        /// predicate does (<c>pra.FileRevision == pra.PageFile.Revision</c>) - via the maintained
+        /// <see cref="PagesEntities.Page.Revision"/>/<see cref="PagesEntities.PageFile.Revision"/> pointers
+        /// themselves, rather than re-deriving the same value via a grouped subquery each time. <see cref="SavePage"/>/
+        /// <see cref="UpsertPageFile"/> (specifically their own "reassociate/carry forward only what's still
+        /// current" logic) already guarantee these two ways of identifying "the current revision" agree for any
+        /// page/file this application has ever written, and this substitution reuses the same, already-proven
+        /// navigation-based <c>ExecuteDeleteAsync</c> predicate style as <see cref="DetachPageRevisionAttachment"/>
+        /// (phase 2b.7) rather than nesting a <c>GroupBy</c>/<c>Max</c> subquery inside each delete's own
+        /// predicate.
+        /// </remarks>
+        public async Task TruncateAllPageRevisions(string confirm)
+        {
+            if (confirm != "YES") //Are you REALLY sure?
+            {
+                return;
+            }
+
+            using var context = _createContext();
+            using var transaction = await context.Database.BeginTransactionAsync();
+
+            try
+            {
+                //Deleting non-current page revisions.
+                await context.Pages_PageRevisions
+                    .Where(pr => context.Pages_Pages.Any(p => p.Id == pr.PageId && p.Revision > pr.Revision))
+                    .ExecuteDeleteAsync();
+
+                //Deleting non-current attachments (by file revision).
+                await context.Pages_PageRevisionAttachments
+                    .Where(a => a.PageFile.Revision > a.FileRevision)
+                    .ExecuteDeleteAsync();
+
+                //Deleting non-current page revision attachments (by page revision).
+                await context.Pages_PageRevisionAttachments
+                    .Where(a => a.Page.Revision > a.PageRevision)
+                    .ExecuteDeleteAsync();
+
+                //Deleting non-current page file revisions.
+                await context.Pages_PageFileRevisions
+                    .Where(fr => fr.PageFile.Revision > fr.Revision)
+                    .ExecuteDeleteAsync();
+
+                //Delete orphaned PageFileRevision (no PageRevisionAttachment references it at all anymore).
+                await context.Pages_PageFileRevisions
+                    .Where(fr => !context.Pages_PageRevisionAttachments.Any(a => a.PageFileId == fr.PageFileId))
+                    .ExecuteDeleteAsync();
+
+                //Delete orphaned PageFile.
+                await context.Pages_PageFiles
+                    .Where(f => !context.Pages_PageRevisionAttachments.Any(a => a.PageFileId == f.Id))
+                    .ExecuteDeleteAsync();
+
+                //Assuming everything else worked, set all of the revisions back to 1.
+                await context.Pages_Pages.ExecuteUpdateAsync(setters => setters.SetProperty(p => p.Revision, 1));
+                await context.Pages_PageRevisions.ExecuteUpdateAsync(setters => setters.SetProperty(pr => pr.Revision, 1));
+                await context.Pages_PageRevisionAttachments.ExecuteUpdateAsync(setters => setters
+                    .SetProperty(a => a.PageRevision, 1)
+                    .SetProperty(a => a.FileRevision, 1));
+                await context.Pages_PageFileRevisions.ExecuteUpdateAsync(setters => setters.SetProperty(fr => fr.Revision, 1));
+                await context.Pages_PageFiles.ExecuteUpdateAsync(setters => setters.SetProperty(f => f.Revision, 1));
+
+                await transaction.CommitAsync();
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                throw;
+            }
+        }
 
         /// <summary>
         /// Mirrors GetCurrentPageRevision.sql: the <see cref="PagesEntities.Page.Revision"/> of the page matching
@@ -1950,20 +2103,555 @@ namespace TightWiki.Data.EfCore.Repositories
             });
         }
 
-        public Task RestoreDeletedPageByPageId(int pageId)
-            => throw new NotImplementedException();
+        /// <summary>
+        /// SQL Server-specific helper used by <see cref="RestoreDeletedPageByPageId"/> - EF Core's SqlServer
+        /// provider does <b>not</b> automatically wrap <c>SET IDENTITY_INSERT ON/OFF</c> around a
+        /// <see cref="DbContext.SaveChangesAsync(CancellationToken)"/> call that inserts an explicit value into a
+        /// store-generated identity column (confirmed empirically against a live SQL Server/LocalDB database - a
+        /// single <c>SaveChangesAsync</c> batching inserts across several tables, only some of which need
+        /// <c>IDENTITY_INSERT</c>, fails outright with "Cannot insert explicit value for identity column..."). So
+        /// this brackets one identity-column table's own <c>SaveChangesAsync</c> call with the necessary raw SQL
+        /// toggle - a no-op (no rows queued, nothing to save) if <paramref name="hasPendingInserts"/> is false.
+        /// Guarded by <see cref="TightWikiDbContext.Database"/>'s provider name (the same check
+        /// <see cref="TightWikiDbContext.StripNonSqliteNoCaseCollation"/> already uses for the analogous "this is
+        /// genuinely SQL-Server-only" situation) rather than referencing the
+        /// <c>Microsoft.EntityFrameworkCore.SqlServer</c> package's own <c>IsSqlServer()</c> extension, since this
+        /// shared, provider-agnostic project deliberately carries no PackageReference to any specific relational
+        /// provider (see this class's own type-level doc comment). Postgres' <c>GENERATED BY DEFAULT AS
+        /// IDENTITY</c> columns (Npgsql's own default for <c>int</c> keys) accept an explicit value with no
+        /// special session state at all, so a future Postgres driver reusing this same shared code needs no
+        /// equivalent branch here.
+        /// </summary>
+        private static async Task SaveChangesWithIdentityInsertAsync(TightWikiDbContext context, string schemaQualifiedTable, bool hasPendingInserts)
+        {
+            bool needsToggle = hasPendingInserts
+                && context.Database.ProviderName?.Contains("SqlServer", StringComparison.OrdinalIgnoreCase) == true;
 
-        public Task MovePageRevisionToDeletedById(int pageId, int revision, Guid userId)
-            => throw new NotImplementedException();
+            //Table names can't be parameterized in T-SQL, and schemaQualifiedTable is always one of this method's
+            //own hardcoded caller-supplied literals ("[Pages].[Page]" etc. - never external/user input), so
+            //there is nothing here for the EF1002/EF1003 SQL-injection analyzer to actually protect against -
+            //suppressed per its own suggested "make sure the value is sanitized and suppress the warning".
+#pragma warning disable EF1002 // Possible SQL injection vulnerability.
+            if (needsToggle)
+            {
+                await context.Database.ExecuteSqlRawAsync($"SET IDENTITY_INSERT {schemaQualifiedTable} ON");
+                try
+                {
+                    await context.SaveChangesAsync();
+                }
+                finally
+                {
+                    await context.Database.ExecuteSqlRawAsync($"SET IDENTITY_INSERT {schemaQualifiedTable} OFF");
+                }
+            }
+            else
+            {
+                await context.SaveChangesAsync();
+            }
+#pragma warning restore EF1002
+        }
 
-        public Task MovePageToDeletedById(int pageId, Guid userId)
-            => throw new NotImplementedException();
+        /// <summary>
+        /// Mirrors RestoreDeletedPageByPageId.sql: the inverse of <see cref="MovePageToDeletedById"/> - copies
+        /// the DeletedPages.Page/PageRevision/PageFile/PageFileRevision/PageRevisionAttachment/PageComment rows
+        /// for <paramref name="pageId"/> back into the corresponding Pages schema tables, then deletes every
+        /// DeletedPages row for the page (including DeletionMeta/PageTag/PageToken/PageProcessingInstruction -
+        /// discarded, not restored, a literal quirk of the reference script, which never copies those three
+        /// tables back into the Pages schema; a subsequent <see cref="UpsertPage"/>/<see cref="RefreshPageMetadata"/>
+        /// on the restored page rebuilds them). One transaction, matching the SQLite reference's own
+        /// <c>o.BeginTransaction()</c>/<c>Commit()</c>/<c>Rollback()</c>. Explicit Id values are preserved
+        /// verbatim on every re-inserted row (matching the reference's own literal column-for-column
+        /// <c>INSERT INTO ... SELECT Id, ...</c>) - Pages.Page/Pages.PageFile/Pages.PageComment are real
+        /// store-generated identity columns (unlike their DeletedPages counterparts, explicitly configured
+        /// <c>ValueGeneratedNever()</c> - see <see cref="Configurations.DeletedPages.PageConfiguration"/>), so
+        /// each of those three tables' inserts is saved in its own dedicated
+        /// <see cref="SaveChangesWithIdentityInsertAsync"/> call, in FK-dependency order (Page, then PageFile,
+        /// before anything that references either); PageRevision/PageFileRevision/PageRevisionAttachment carry no
+        /// single-column identity (composite primary keys), so their inserts are saved together in one ordinary
+        /// call once Page/PageFile both exist. Flushes this page's cache via <see cref="FlushPageCache"/>
+        /// afterward, same as the SQLite reference.
+        /// </summary>
+        public async Task RestoreDeletedPageByPageId(int pageId)
+        {
+            using var context = _createContext();
+            using var transaction = await context.Database.BeginTransactionAsync();
 
-        public Task PurgeDeletedPageByPageId(int pageId)
-            => throw new NotImplementedException();
+            try
+            {
+                var deletedPage = await context.DeletedPages_Pages.AsNoTracking()
+                    .FirstOrDefaultAsync(p => p.Id == pageId);
 
-        public Task PurgeDeletedPages()
-            => throw new NotImplementedException();
+                if (deletedPage != null)
+                {
+                    context.Pages_Pages.Add(new PagesEntities.Page
+                    {
+                        Id = deletedPage.Id,
+                        Name = deletedPage.Name,
+                        Namespace = deletedPage.Namespace,
+                        Navigation = deletedPage.Navigation,
+                        Description = deletedPage.Description,
+                        Revision = deletedPage.Revision,
+                        CreatedByUserId = deletedPage.CreatedByUserId,
+                        CreatedDate = deletedPage.CreatedDate,
+                        ModifiedByUserId = deletedPage.ModifiedByUserId,
+                        ModifiedDate = deletedPage.ModifiedDate,
+                    });
+                }
+                await SaveChangesWithIdentityInsertAsync(context, "[Pages].[Page]", deletedPage != null);
+
+                var deletedFiles = await context.DeletedPages_PageFiles.AsNoTracking()
+                    .Where(f => f.PageId == pageId).ToListAsync();
+                context.Pages_PageFiles.AddRange(deletedFiles.Select(f => new PagesEntities.PageFile
+                {
+                    Id = f.Id,
+                    PageId = f.PageId,
+                    Name = f.Name,
+                    Navigation = f.Navigation,
+                    Revision = f.Revision,
+                    CreatedDate = f.CreatedDate,
+                }));
+                await SaveChangesWithIdentityInsertAsync(context, "[Pages].[PageFile]", deletedFiles.Count > 0);
+
+                var deletedRevisions = await context.DeletedPages_PageRevisions.AsNoTracking()
+                    .Where(pr => pr.PageId == pageId).ToListAsync();
+                context.Pages_PageRevisions.AddRange(deletedRevisions.Select(pr => new PagesEntities.PageRevision
+                {
+                    PageId = pr.PageId,
+                    Name = pr.Name,
+                    Namespace = pr.Namespace,
+                    Description = pr.Description,
+                    Body = pr.Body,
+                    Revision = pr.Revision,
+                    ChangeSummary = pr.ChangeSummary,
+                    ModifiedByUserId = pr.ModifiedByUserId,
+                    ModifiedDate = pr.ModifiedDate,
+                    DataHash = pr.DataHash,
+                }));
+
+                var deletedFileIds = deletedFiles.Select(f => f.Id).ToList();
+                var deletedFileRevisions = await context.DeletedPages_PageFileRevisions.AsNoTracking()
+                    .Where(fr => deletedFileIds.Contains(fr.PageFileId)).ToListAsync();
+                context.Pages_PageFileRevisions.AddRange(deletedFileRevisions.Select(fr => new PagesEntities.PageFileRevision
+                {
+                    PageFileId = fr.PageFileId,
+                    ContentType = fr.ContentType,
+                    Size = fr.Size,
+                    CreatedByUserId = fr.CreatedByUserId,
+                    CreatedDate = fr.CreatedDate,
+                    Data = fr.Data,
+                    Revision = fr.Revision,
+                    DataHash = fr.DataHash,
+                }));
+
+                var deletedAttachments = await context.DeletedPages_PageRevisionAttachments.AsNoTracking()
+                    .Where(a => a.PageId == pageId).ToListAsync();
+                context.Pages_PageRevisionAttachments.AddRange(deletedAttachments.Select(a => new PagesEntities.PageRevisionAttachment
+                {
+                    PageId = a.PageId,
+                    PageFileId = a.PageFileId,
+                    FileRevision = a.FileRevision,
+                    PageRevision = a.PageRevision,
+                }));
+
+                await context.SaveChangesAsync();
+
+                var deletedComments = await context.DeletedPages_PageComments.AsNoTracking()
+                    .Where(c => c.PageId == pageId).ToListAsync();
+                context.Pages_PageComments.AddRange(deletedComments.Select(c => new PagesEntities.PageComment
+                {
+                    Id = c.Id,
+                    PageId = c.PageId,
+                    CreatedDate = c.CreatedDate,
+                    UserId = c.UserId,
+                    Body = c.Body,
+                }));
+                await SaveChangesWithIdentityInsertAsync(context, "[Pages].[PageComment]", deletedComments.Count > 0);
+
+                //Cleanup - discard the deleted page's tags/tokens/processing instructions rather than restoring
+                //them (matching the reference script, which never inserts these three tables back into Pages).
+                await context.DeletedPages_DeletionMetas.Where(d => d.PageId == pageId).ExecuteDeleteAsync();
+                await context.DeletedPages_PageTags.Where(t => t.PageId == pageId).ExecuteDeleteAsync();
+                await context.DeletedPages_PageTokens.Where(t => t.PageId == pageId).ExecuteDeleteAsync();
+                await context.DeletedPages_PageProcessingInstructions.Where(pi => pi.PageId == pageId).ExecuteDeleteAsync();
+                await context.DeletedPages_PageComments.Where(c => c.PageId == pageId).ExecuteDeleteAsync();
+                await context.DeletedPages_PageRevisions.Where(pr => pr.PageId == pageId).ExecuteDeleteAsync();
+                await context.DeletedPages_PageRevisionAttachments.Where(a => a.PageId == pageId).ExecuteDeleteAsync();
+                await context.DeletedPages_PageFileRevisions.Where(fr => deletedFileIds.Contains(fr.PageFileId)).ExecuteDeleteAsync();
+                await context.DeletedPages_PageFiles.Where(f => f.PageId == pageId).ExecuteDeleteAsync();
+                await context.DeletedPages_Pages.Where(p => p.Id == pageId).ExecuteDeleteAsync();
+
+                await transaction.CommitAsync();
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                throw;
+            }
+
+            await FlushPageCache(pageId);
+        }
+
+        /// <summary>
+        /// Mirrors MovePageRevisionToDeletedById.sql: copies the single Pages.PageRevision row (and its
+        /// Pages.PageRevisionAttachment rows) matching (<paramref name="pageId"/>, <paramref name="revision"/>)
+        /// into the corresponding DeletedPageRevisions schema tables, records a DeletedPageRevisions.DeletionMeta
+        /// row (<paramref name="userId"/>/now, UTC), then deletes the originals from the Pages schema - one
+        /// transaction, matching the SQLite reference's own <c>o.BeginTransaction()</c>/<c>Commit()</c>/
+        /// <c>Rollback()</c>. Unlike <see cref="MovePageToDeletedById"/>, this never touches
+        /// <see cref="PagesEntities.Page.Revision"/> itself - matching the reference script exactly (this method
+        /// is only ever invoked from the UI against a page's non-current, already-superseded revisions, so the
+        /// page's own current-revision pointer is left alone). Flushes this page's cache via
+        /// <see cref="FlushPageCache"/> afterward, same as the SQLite reference.
+        /// </summary>
+        public async Task MovePageRevisionToDeletedById(int pageId, int revision, Guid userId)
+        {
+            var deletedDate = DateTime.UtcNow;
+
+            using var context = _createContext();
+            using var transaction = await context.Database.BeginTransactionAsync();
+
+            try
+            {
+                var pageRevision = await context.Pages_PageRevisions.AsNoTracking()
+                    .FirstOrDefaultAsync(pr => pr.PageId == pageId && pr.Revision == revision);
+
+                if (pageRevision != null)
+                {
+                    context.DeletedPageRevisions_PageRevisions.Add(new DeletedPageRevisionsEntities.PageRevision
+                    {
+                        PageId = pageRevision.PageId,
+                        Name = pageRevision.Name,
+                        Namespace = pageRevision.Namespace,
+                        Description = pageRevision.Description,
+                        Body = pageRevision.Body,
+                        Revision = pageRevision.Revision,
+                        ChangeSummary = pageRevision.ChangeSummary,
+                        ModifiedByUserId = pageRevision.ModifiedByUserId,
+                        ModifiedDate = pageRevision.ModifiedDate,
+                        DataHash = pageRevision.DataHash,
+                    });
+                }
+
+                var attachments = await context.Pages_PageRevisionAttachments.AsNoTracking()
+                    .Where(a => a.PageId == pageId && a.PageRevision == revision).ToListAsync();
+                context.DeletedPageRevisions_PageRevisionAttachments.AddRange(attachments.Select(a => new DeletedPageRevisionsEntities.PageRevisionAttachment
+                {
+                    PageId = a.PageId,
+                    PageFileId = a.PageFileId,
+                    FileRevision = a.FileRevision,
+                    PageRevision = a.PageRevision,
+                }));
+
+                context.DeletedPageRevisions_DeletionMetas.Add(new DeletedPageRevisionsEntities.DeletionMeta
+                {
+                    PageId = pageId,
+                    Revision = revision,
+                    DeletedByUserId = userId,
+                    DeletedDate = deletedDate,
+                });
+
+                await context.SaveChangesAsync();
+
+                await context.Pages_PageRevisionAttachments
+                    .Where(a => a.PageId == pageId && a.PageRevision == revision)
+                    .ExecuteDeleteAsync();
+
+                await context.Pages_PageRevisions
+                    .Where(pr => pr.PageId == pageId && pr.Revision == revision)
+                    .ExecuteDeleteAsync();
+
+                await transaction.CommitAsync();
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                throw;
+            }
+
+            await FlushPageCache(pageId);
+        }
+
+        /// <summary>
+        /// Mirrors MovePageToDeletedById.sql: soft-deletes an entire page - orphans any Pages.FeatureTemplate
+        /// pointing at it (<see cref="PagesEntities.FeatureTemplate.PageId"/> set to null, the reference script's
+        /// own first statement), copies every Pages.PageComment/PageRevision/PageRevisionAttachment/PageFileRevision/
+        /// PageFile/Page/PageTag/PageToken/PageProcessingInstruction row for <paramref name="pageId"/> into the
+        /// corresponding DeletedPages schema tables (DeletedPages.PageTag carries no Navigation column - only
+        /// Tag/PageId are copied, matching <see cref="Entities.DeletedPages.PageTag"/>), records a
+        /// DeletedPages.DeletionMeta row (<paramref name="userId"/>/now, UTC), then deletes every one of those
+        /// rows from the Pages schema (in the same order as the reference script) plus every Pages.PageReference
+        /// row in either direction (as source or as target - discarded, not moved, matching the reference; an
+        /// incoming reference simply becomes a broken/missing-page reference again). One transaction, matching
+        /// the SQLite reference's own <c>o.BeginTransaction()</c>/<c>Commit()</c>/<c>Rollback()</c>. Explicit Id
+        /// values are preserved verbatim on every copied row - unlike <see cref="RestoreDeletedPageByPageId"/>'s
+        /// own restore direction, this needs no manual <c>IDENTITY_INSERT</c> handling, since every DeletedPages
+        /// table this writes into (Page/PageFile/PageComment) is explicitly configured
+        /// <c>ValueGeneratedNever()</c> on its Id column (see e.g. <see cref="Configurations.DeletedPages.PageConfiguration"/>) -
+        /// only the corresponding Pages-schema tables are real identity columns. Flushes this page's cache via
+        /// <see cref="FlushPageCache"/> afterward, same as the SQLite reference.
+        /// </summary>
+        /// <remarks>
+        /// <b>Deliberate divergence from the SQLite reference, forced by a real FOREIGN KEY.</b> After committing,
+        /// the SQLite reference (<c>PageRepository.MovePageToDeletedById</c>) separately calls
+        /// <c>StatisticsRepository.DeletePageStatisticsByPageId</c> <i>outside</i> its own transaction - safe
+        /// there only because Statistics.PageStatistics lives in a physically different SQLite database file with
+        /// no cross-database FOREIGN KEY enforcement at all. In the consolidated schema,
+        /// <see cref="Entities.Statistics.PageStatistic.Page"/> carries a real, enforced FOREIGN KEY against
+        /// Pages.Page (see that navigation's own doc comment) - attempting to delete a Pages.Page row while an
+        /// unrelated <see cref="TightWikiDbContext.PageStatistics"/> row still references it fails with a
+        /// FOREIGN KEY violation (confirmed empirically against a live SQL Server/LocalDB database). So this
+        /// cleanup instead runs <i>inside</i> the same transaction, immediately before the Pages.Page delete
+        /// below - functionally identical to <see cref="EfStatisticsRepository.DeletePageStatisticsByPageId"/>,
+        /// done directly against <see cref="TightWikiDbContext.PageStatistics"/> rather than through an injected
+        /// <see cref="ITwStatisticsRepository"/> (this class isn't constructed with one - see this class's own
+        /// constructor/type-level remarks).
+        /// </remarks>
+        public async Task MovePageToDeletedById(int pageId, Guid userId)
+        {
+            var deletedDate = DateTime.UtcNow;
+
+            using var context = _createContext();
+            using var transaction = await context.Database.BeginTransactionAsync();
+
+            try
+            {
+                await context.FeatureTemplates
+                    .Where(ft => ft.PageId == pageId)
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(ft => ft.PageId, (int?)null));
+
+                var page = await context.Pages_Pages.AsNoTracking().FirstOrDefaultAsync(p => p.Id == pageId);
+
+                var comments = await context.Pages_PageComments.AsNoTracking().Where(c => c.PageId == pageId).ToListAsync();
+                context.DeletedPages_PageComments.AddRange(comments.Select(c => new DeletedPagesEntities.PageComment
+                {
+                    Id = c.Id,
+                    PageId = c.PageId,
+                    CreatedDate = c.CreatedDate,
+                    UserId = c.UserId,
+                    Body = c.Body,
+                }));
+
+                var revisions = await context.Pages_PageRevisions.AsNoTracking().Where(pr => pr.PageId == pageId).ToListAsync();
+                context.DeletedPages_PageRevisions.AddRange(revisions.Select(pr => new DeletedPagesEntities.PageRevision
+                {
+                    PageId = pr.PageId,
+                    Name = pr.Name,
+                    Namespace = pr.Namespace,
+                    Description = pr.Description,
+                    Body = pr.Body,
+                    Revision = pr.Revision,
+                    ChangeSummary = pr.ChangeSummary,
+                    ModifiedByUserId = pr.ModifiedByUserId,
+                    ModifiedDate = pr.ModifiedDate,
+                    DataHash = pr.DataHash,
+                }));
+
+                var attachments = await context.Pages_PageRevisionAttachments.AsNoTracking().Where(a => a.PageId == pageId).ToListAsync();
+                context.DeletedPages_PageRevisionAttachments.AddRange(attachments.Select(a => new DeletedPagesEntities.PageRevisionAttachment
+                {
+                    PageId = a.PageId,
+                    PageFileId = a.PageFileId,
+                    FileRevision = a.FileRevision,
+                    PageRevision = a.PageRevision,
+                }));
+
+                var fileIds = await context.Pages_PageFiles.Where(f => f.PageId == pageId).Select(f => f.Id).ToListAsync();
+
+                var fileRevisions = await context.Pages_PageFileRevisions.AsNoTracking()
+                    .Where(fr => fileIds.Contains(fr.PageFileId)).ToListAsync();
+                context.DeletedPages_PageFileRevisions.AddRange(fileRevisions.Select(fr => new DeletedPagesEntities.PageFileRevision
+                {
+                    PageFileId = fr.PageFileId,
+                    ContentType = fr.ContentType,
+                    Size = fr.Size,
+                    CreatedByUserId = fr.CreatedByUserId,
+                    CreatedDate = fr.CreatedDate,
+                    Data = fr.Data,
+                    Revision = fr.Revision,
+                    DataHash = fr.DataHash,
+                }));
+
+                var files = await context.Pages_PageFiles.AsNoTracking().Where(f => f.PageId == pageId).ToListAsync();
+                context.DeletedPages_PageFiles.AddRange(files.Select(f => new DeletedPagesEntities.PageFile
+                {
+                    Id = f.Id,
+                    PageId = f.PageId,
+                    Name = f.Name,
+                    Navigation = f.Navigation,
+                    Revision = f.Revision,
+                    CreatedDate = f.CreatedDate,
+                }));
+
+                if (page != null)
+                {
+                    context.DeletedPages_Pages.Add(new DeletedPagesEntities.Page
+                    {
+                        Id = page.Id,
+                        Name = page.Name,
+                        Namespace = page.Namespace,
+                        Navigation = page.Navigation,
+                        Description = page.Description,
+                        Revision = page.Revision,
+                        CreatedByUserId = page.CreatedByUserId,
+                        CreatedDate = page.CreatedDate,
+                        ModifiedByUserId = page.ModifiedByUserId,
+                        ModifiedDate = page.ModifiedDate,
+                    });
+                }
+
+                var tags = await context.Pages_PageTags.AsNoTracking().Where(t => t.PageId == pageId).ToListAsync();
+                context.DeletedPages_PageTags.AddRange(tags.Select(t => new DeletedPagesEntities.PageTag
+                {
+                    PageId = t.PageId,
+                    Tag = t.Tag,
+                }));
+
+                var tokens = await context.Pages_PageTokens.AsNoTracking().Where(t => t.PageId == pageId).ToListAsync();
+                context.DeletedPages_PageTokens.AddRange(tokens.Select(t => new DeletedPagesEntities.PageToken
+                {
+                    PageId = t.PageId,
+                    Token = t.Token,
+                    Weight = t.Weight,
+                    DoubleMetaphone = t.DoubleMetaphone,
+                }));
+
+                var instructions = await context.Pages_PageProcessingInstructions.AsNoTracking().Where(pi => pi.PageId == pageId).ToListAsync();
+                context.DeletedPages_PageProcessingInstructions.AddRange(instructions.Select(pi => new DeletedPagesEntities.PageProcessingInstruction
+                {
+                    PageId = pi.PageId,
+                    Instruction = pi.Instruction,
+                }));
+
+                context.DeletedPages_DeletionMetas.Add(new DeletedPagesEntities.DeletionMeta
+                {
+                    PageId = pageId,
+                    DeletedByUserId = userId,
+                    DeletedDate = deletedDate,
+                });
+
+                await context.SaveChangesAsync();
+
+                //Cleanup - delete everything that was just moved above, plus outgoing/incoming PageReference rows
+                //(discarded, not moved - matching the reference script), in the same order as the reference.
+                await context.Pages_PageComments.Where(c => c.PageId == pageId).ExecuteDeleteAsync();
+                await context.Pages_PageFileRevisions.Where(fr => fileIds.Contains(fr.PageFileId)).ExecuteDeleteAsync();
+                await context.Pages_PageRevisionAttachments.Where(a => a.PageId == pageId).ExecuteDeleteAsync();
+                await context.Pages_PageFiles.Where(f => f.PageId == pageId).ExecuteDeleteAsync();
+                await context.Pages_PageProcessingInstructions.Where(pi => pi.PageId == pageId).ExecuteDeleteAsync();
+                await context.PageReferences.Where(pr => pr.PageId == pageId).ExecuteDeleteAsync();
+                await context.PageReferences.Where(pr => pr.ReferencesPageId == pageId).ExecuteDeleteAsync();
+                await context.Pages_PageRevisions.Where(pr => pr.PageId == pageId).ExecuteDeleteAsync();
+                await context.Pages_PageTags.Where(t => t.PageId == pageId).ExecuteDeleteAsync();
+                await context.Pages_PageTokens.Where(t => t.PageId == pageId).ExecuteDeleteAsync();
+
+                //Statistics.PageStatistics carries a real FOREIGN KEY against Pages.Page in the consolidated
+                //schema (Entities.Statistics.PageStatistic.Page's own doc comment - unlike every *UserId
+                //navigation elsewhere in this model, this one is enforced) - see this method's own remarks for
+                //why that forces this cleanup to happen here, inside the transaction and before the Pages.Page
+                //delete below, rather than after committing like the SQLite reference.
+                await context.PageStatistics.Where(ps => ps.PageId == pageId).ExecuteDeleteAsync();
+
+                await context.Pages_Pages.Where(p => p.Id == pageId).ExecuteDeleteAsync();
+
+                await transaction.CommitAsync();
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                throw;
+            }
+
+            await FlushPageCache(pageId);
+        }
+
+        /// <summary>
+        /// Mirrors PurgeDeletedPageByPageId.sql plus its own trailing call into
+        /// <see cref="PurgeDeletedPageRevisionsByPageId"/>: permanently deletes every DeletedPages row
+        /// (DeletionMeta/PageTag/PageToken/PageProcessingInstruction/PageComment/PageRevision/PageRevisionAttachment/
+        /// PageFileRevision/PageFile/Page) for <paramref name="pageId"/> in one transaction, then - matching
+        /// <c>PageRepository.PurgeDeletedPageByPageId</c>'s own sequencing exactly - separately purges every
+        /// DeletedPageRevisions row for the same page via <see cref="PurgeDeletedPageRevisionsByPageId"/> (which
+        /// flushes this page's cache on its own), then flushes this page's cache again here too, same as the
+        /// SQLite reference (which calls <c>FlushPageCache</c> both inside <c>PurgeDeletedPageRevisionsByPageId</c>
+        /// and again at the end of <c>PurgeDeletedPageByPageId</c> itself).
+        /// </summary>
+        public async Task PurgeDeletedPageByPageId(int pageId)
+        {
+            using var context = _createContext();
+            using var transaction = await context.Database.BeginTransactionAsync();
+
+            try
+            {
+                await context.DeletedPages_DeletionMetas.Where(d => d.PageId == pageId).ExecuteDeleteAsync();
+                await context.DeletedPages_PageTags.Where(t => t.PageId == pageId).ExecuteDeleteAsync();
+                await context.DeletedPages_PageTokens.Where(t => t.PageId == pageId).ExecuteDeleteAsync();
+                await context.DeletedPages_PageProcessingInstructions.Where(pi => pi.PageId == pageId).ExecuteDeleteAsync();
+                await context.DeletedPages_PageComments.Where(c => c.PageId == pageId).ExecuteDeleteAsync();
+                await context.DeletedPages_PageRevisions.Where(pr => pr.PageId == pageId).ExecuteDeleteAsync();
+                await context.DeletedPages_PageRevisionAttachments.Where(a => a.PageId == pageId).ExecuteDeleteAsync();
+
+                var deletedFileIds = await context.DeletedPages_PageFiles.Where(f => f.PageId == pageId).Select(f => f.Id).ToListAsync();
+                await context.DeletedPages_PageFileRevisions.Where(fr => deletedFileIds.Contains(fr.PageFileId)).ExecuteDeleteAsync();
+
+                await context.DeletedPages_PageFiles.Where(f => f.PageId == pageId).ExecuteDeleteAsync();
+                await context.DeletedPages_Pages.Where(p => p.Id == pageId).ExecuteDeleteAsync();
+
+                await transaction.CommitAsync();
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                throw;
+            }
+
+            await PurgeDeletedPageRevisionsByPageId(pageId);
+
+            await FlushPageCache(pageId);
+        }
+
+        /// <summary>
+        /// Mirrors PurgeDeletedPages.sql plus its own trailing call into <see cref="PurgeDeletedPageRevisions"/>:
+        /// permanently deletes every row from DeletedPages.PageComment/PageRevision/PageRevisionAttachment/
+        /// PageFileRevision/PageFile/Page/DeletionMeta (in that order, matching the reference script exactly),
+        /// then separately purges every DeletedPageRevisions row across every page via
+        /// <see cref="PurgeDeletedPageRevisions"/>, same as <c>PageRepository.PurgeDeletedPages</c>.
+        /// </summary>
+        /// <remarks>
+        /// <b>Confirmed, deliberately-not-"fixed" gap in the SQLite reference.</b> Unlike
+        /// <see cref="PurgeDeletedPageByPageId"/>'s own reference script, PurgeDeletedPages.sql never deletes
+        /// DeletedPages.PageTag/PageToken/PageProcessingInstruction - so purging every deleted page still leaves
+        /// those three tables' rows behind as orphans (with no owning DeletedPages.Page row left to join back
+        /// to). This asymmetry between the single-page and purge-all reference scripts is preserved verbatim here
+        /// rather than "fixed" by additionally clearing those three tables, per this class's established
+        /// convention of faithfully reproducing the reference's real behavior (see e.g.
+        /// <see cref="UpdatePageReferences"/>'s remarks for the same policy applied to an actual bug, as opposed
+        /// to this merely-inconsistent-looking omission).
+        /// </remarks>
+        public async Task PurgeDeletedPages()
+        {
+            using var context = _createContext();
+            using var transaction = await context.Database.BeginTransactionAsync();
+
+            try
+            {
+                await context.DeletedPages_PageComments.ExecuteDeleteAsync();
+                await context.DeletedPages_PageRevisions.ExecuteDeleteAsync();
+                await context.DeletedPages_PageRevisionAttachments.ExecuteDeleteAsync();
+                await context.DeletedPages_PageFileRevisions.ExecuteDeleteAsync();
+                await context.DeletedPages_PageFiles.ExecuteDeleteAsync();
+                await context.DeletedPages_Pages.ExecuteDeleteAsync();
+                await context.DeletedPages_DeletionMetas.ExecuteDeleteAsync();
+
+                await transaction.CommitAsync();
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                throw;
+            }
+
+            await PurgeDeletedPageRevisions();
+        }
 
         /// <summary>
         /// Mirrors GetCountOfPageAttachmentsById.sql: the count of Pages.PageFile rows for
@@ -1976,8 +2664,42 @@ namespace TightWiki.Data.EfCore.Repositories
             return await context.Pages_PageFiles.CountAsync(f => f.PageId == pageId);
         }
 
-        public Task<TwPage?> GetDeletedPageById(int pageId)
-            => throw new NotImplementedException();
+        /// <summary>
+        /// Mirrors GetDeletedPageById.sql: an inner join of DeletedPages.Page to the DeletedPages.PageRevision row
+        /// matching its own <see cref="DeletedPagesEntities.Page.Revision"/>, further inner-joined to the page's
+        /// DeletedPages.DeletionMeta row, for <paramref name="pageId"/>. <see cref="TwPage.DeletedByUserId"/> is
+        /// deliberately left unset here - the same literal quirk as
+        /// <see cref="GetAllDeletedPagesPaged"/>'s own remarks (the reference script selects
+        /// <c>DeletedUser.AccountName as DeletedByUserName</c> but never the raw <c>DM.DeletedByUserID</c> column
+        /// itself). No caching, matching the SQLite reference.
+        /// </summary>
+        public async Task<TwPage?> GetDeletedPageById(int pageId)
+        {
+            using var context = _createContext();
+
+            return await (from p in context.DeletedPages_Pages
+                           join pr in context.DeletedPages_PageRevisions on new { p.Id, p.Revision } equals new { Id = pr.PageId, pr.Revision }
+                           join dm in context.DeletedPages_DeletionMetas on p.Id equals dm.PageId
+                           where p.Id == pageId
+                           select new TwPage
+                           {
+                               Id = p.Id,
+                               Name = p.Name,
+                               Description = pr.Description,
+                               Body = pr.Body,
+                               Revision = pr.Revision,
+                               MostCurrentRevision = p.Revision,
+                               Navigation = p.Navigation,
+                               CreatedByUserId = p.CreatedByUserId,
+                               CreatedDate = p.CreatedDate,
+                               ModifiedByUserId = pr.ModifiedByUserId,
+                               ModifiedDate = pr.ModifiedDate,
+                               DeletedDate = dm.DeletedDate ?? default,
+                               CreatedByUserName = p.CreatedByUser != null ? (p.CreatedByUser.AccountName ?? string.Empty) : string.Empty,
+                               ModifiedByUserName = p.ModifiedByUser != null ? (p.ModifiedByUser.AccountName ?? string.Empty) : string.Empty,
+                               DeletedByUserName = dm.DeletedByUser != null ? (dm.DeletedByUser.AccountName ?? string.Empty) : string.Empty,
+                           }).SingleOrDefaultAsync();
+        }
 
         /// <summary>
         /// Mirrors GetLatestPageRevisionById.sql: an inner join of Pages.Page to the Pages.PageRevision row
@@ -2045,23 +2767,253 @@ namespace TightWiki.Data.EfCore.Repositories
                 .FirstOrDefaultAsync();
         }
 
-        public Task<List<TwDeletedPageRevision>> GetDeletedPageRevisionsByIdPaged(int pageId, int pageNumber, string? orderBy = null, string? orderByDirection = null)
-            => throw new NotImplementedException();
+        /// <summary>
+        /// Mirrors GetDeletedPageRevisionsByIdPaged.sql: every DeletedPageRevisions.PageRevision row for
+        /// <paramref name="pageId"/>, inner-joined to its own DeletedPageRevisions.DeletionMeta row, LEFT OUTER
+        /// JOINed to Users.Profile for the deleting user - via the existing
+        /// <see cref="DeletedPageRevisionsEntities.DeletionMeta.DeletedByUser"/> navigation rather than the
+        /// script's own cross-database <c>o.Attach("users.db", "users_db")</c>. <see cref="TwPage.Id"/> (on the
+        /// returned <see cref="TwDeletedPageRevision"/>) is populated from <c>PR.PageId</c>, matching the
+        /// reference's own <c>PR.PageId as Id</c>. <paramref name="pageNumber"/> is paginated by the "Pagination
+        /// Size" customization setting, same as the reference; <see cref="TwDeletedPageRevision.PaginationPageSize"/>/
+        /// <see cref="TwPage.PaginationPageCount"/> are computed via the reference's own ceiling-division formula
+        /// against the total (unpaginated) count of DeletedPageRevisions.PageRevision rows for the page - note
+        /// this denominator is <i>not</i> further restricted to rows with a matching DeletionMeta row (matching
+        /// the reference script's own subquery, which counts <c>[PageRevision]</c> alone with no DeletionMeta
+        /// join). Ordering mirrors <c>RepositoryHelpers.TransposeOrderby</c> against the script's <c>--CONFIG::</c>
+        /// mapping ("Revision"/"DeletedDate"/"DeletedBy"): no <paramref name="orderBy"/> falls back to the
+        /// script's own un-transposed "ORDER BY PR.Revision" (always ascending - no <c>DESC</c> keyword in the
+        /// reference), matching <see cref="GetPageRevisionsInfoByNavigationPaged"/>'s convention for an
+        /// unrecognized <paramref name="orderBy"/> throwing.
+        /// </summary>
+        public async Task<List<TwDeletedPageRevision>> GetDeletedPageRevisionsByIdPaged(int pageId, int pageNumber, string? orderBy = null, string? orderByDirection = null)
+        {
+            var paginationSize = await _configurationRepository.Get<int>(TwConfigGroup.Customization, "Pagination Size");
 
-        public Task PurgeDeletedPageRevisions()
-            => throw new NotImplementedException();
+            using var context = _createContext();
 
-        public Task PurgeDeletedPageRevisionsByPageId(int pageId)
-            => throw new NotImplementedException();
+            var totalCount = await context.DeletedPageRevisions_PageRevisions.CountAsync(pr => pr.PageId == pageId);
+            var paginationPageCount = (totalCount + (paginationSize - 1)) / paginationSize;
 
-        public Task PurgeDeletedPageRevisionByPageIdAndRevision(int pageId, int revision)
-            => throw new NotImplementedException();
+            var joined = from pr in context.DeletedPageRevisions_PageRevisions
+                         join dm in context.DeletedPageRevisions_DeletionMetas on new { pr.PageId, pr.Revision } equals new { dm.PageId, dm.Revision }
+                         where pr.PageId == pageId
+                         select new { pr, dm };
 
-        public Task RestoreDeletedPageRevisionByPageIdAndRevision(int pageId, int revision)
-            => throw new NotImplementedException();
+            bool ascending = string.Equals(orderByDirection, "asc", StringComparison.InvariantCultureIgnoreCase);
 
-        public Task<TwDeletedPageRevision?> GetDeletedPageRevisionById(int pageId, int revision)
-            => throw new NotImplementedException();
+            var ordered = string.IsNullOrEmpty(orderBy)
+                ? joined.OrderBy(x => x.pr.Revision)
+                : orderBy.ToUpperInvariant() switch
+                {
+                    "REVISION" => ascending ? joined.OrderBy(x => x.pr.Revision) : joined.OrderByDescending(x => x.pr.Revision),
+                    "DELETEDDATE" => ascending ? joined.OrderBy(x => x.dm.DeletedDate) : joined.OrderByDescending(x => x.dm.DeletedDate),
+                    "DELETEDBY" => ascending
+                        ? joined.OrderBy(x => x.dm.DeletedByUser != null ? x.dm.DeletedByUser.AccountName : null)
+                        : joined.OrderByDescending(x => x.dm.DeletedByUser != null ? x.dm.DeletedByUser.AccountName : null),
+                    _ => throw new InvalidOperationException(
+                        $"No order by mapping was found in 'GetDeletedPageRevisionsByIdPaged.sql' for the field '{orderBy}'."),
+                };
+
+            return await ordered
+                .Skip((pageNumber - 1) * paginationSize)
+                .Take(paginationSize)
+                .Select(x => new TwDeletedPageRevision
+                {
+                    Id = x.pr.PageId,
+                    Name = x.pr.Name,
+                    Description = x.pr.Description,
+                    Revision = x.pr.Revision,
+                    DeletedDate = x.dm.DeletedDate ?? default,
+                    DeletedByUserName = x.dm.DeletedByUser != null ? (x.dm.DeletedByUser.AccountName ?? string.Empty) : string.Empty,
+                    PaginationPageSize = paginationSize,
+                    PaginationPageCount = paginationPageCount,
+                }).ToListAsync();
+        }
+
+        /// <summary>
+        /// Mirrors PurgeDeletedPageRevisions.sql: permanently deletes every row from
+        /// DeletedPageRevisions.PageRevision/PageRevisionAttachment/DeletionMeta (in that order, matching the
+        /// reference script exactly), across every page. One transaction, matching the same pattern as
+        /// <see cref="PurgeDeletedPages"/>.
+        /// </summary>
+        public async Task PurgeDeletedPageRevisions()
+        {
+            using var context = _createContext();
+            using var transaction = await context.Database.BeginTransactionAsync();
+
+            try
+            {
+                await context.DeletedPageRevisions_PageRevisions.ExecuteDeleteAsync();
+                await context.DeletedPageRevisions_PageRevisionAttachments.ExecuteDeleteAsync();
+                await context.DeletedPageRevisions_DeletionMetas.ExecuteDeleteAsync();
+
+                await transaction.CommitAsync();
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Mirrors PurgeDeletedPageRevisionsByPageId.sql: permanently deletes every DeletedPageRevisions.PageRevision/
+        /// PageRevisionAttachment/DeletionMeta row for <paramref name="pageId"/> (in that order, matching the
+        /// reference script exactly). One transaction, same pattern as <see cref="PurgeDeletedPageRevisions"/>.
+        /// Flushes this page's cache via <see cref="FlushPageCache"/> afterward, same as the SQLite reference.
+        /// </summary>
+        public async Task PurgeDeletedPageRevisionsByPageId(int pageId)
+        {
+            using var context = _createContext();
+            using var transaction = await context.Database.BeginTransactionAsync();
+
+            try
+            {
+                await context.DeletedPageRevisions_PageRevisions.Where(pr => pr.PageId == pageId).ExecuteDeleteAsync();
+                await context.DeletedPageRevisions_PageRevisionAttachments.Where(a => a.PageId == pageId).ExecuteDeleteAsync();
+                await context.DeletedPageRevisions_DeletionMetas.Where(dm => dm.PageId == pageId).ExecuteDeleteAsync();
+
+                await transaction.CommitAsync();
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                throw;
+            }
+
+            await FlushPageCache(pageId);
+        }
+
+        /// <summary>
+        /// Mirrors PurgeDeletedPageRevisionByPageIdAndRevision.sql: permanently deletes the single
+        /// DeletedPageRevisions.PageRevision/PageRevisionAttachment/DeletionMeta row(s) matching
+        /// (<paramref name="pageId"/>, <paramref name="revision"/>). One transaction, same pattern as
+        /// <see cref="PurgeDeletedPageRevisions"/>. Flushes this page's cache via <see cref="FlushPageCache"/>
+        /// afterward, same as the SQLite reference.
+        /// </summary>
+        public async Task PurgeDeletedPageRevisionByPageIdAndRevision(int pageId, int revision)
+        {
+            using var context = _createContext();
+            using var transaction = await context.Database.BeginTransactionAsync();
+
+            try
+            {
+                await context.DeletedPageRevisions_PageRevisions.Where(pr => pr.PageId == pageId && pr.Revision == revision).ExecuteDeleteAsync();
+                await context.DeletedPageRevisions_PageRevisionAttachments.Where(a => a.PageId == pageId && a.PageRevision == revision).ExecuteDeleteAsync();
+                await context.DeletedPageRevisions_DeletionMetas.Where(dm => dm.PageId == pageId && dm.Revision == revision).ExecuteDeleteAsync();
+
+                await transaction.CommitAsync();
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                throw;
+            }
+
+            await FlushPageCache(pageId);
+        }
+
+        /// <summary>
+        /// Mirrors RestoreDeletedPageRevisionByPageIdAndRevision.sql: the inverse of
+        /// <see cref="MovePageRevisionToDeletedById"/> - copies the DeletedPageRevisions.PageRevision/
+        /// PageRevisionAttachment row(s) matching (<paramref name="pageId"/>, <paramref name="revision"/>) back
+        /// into the Pages schema, then deletes the DeletedPageRevisions.DeletionMeta/PageRevisionAttachment/
+        /// PageRevision originals (in that order, matching the reference script exactly). Despite this method
+        /// living on the "DeletedPageRevisions side" of the interface, the reference script's own restore
+        /// direction is into the Pages schema (its own <c>o.Attach("pages.db", "pages_db")</c>, run from
+        /// <c>DeletedPageRevisionsFactory</c>) - i.e. the opposite direction from every other DeletedPageRevisions
+        /// method here, which all operate purely within that one schema. One transaction, matching the SQLite
+        /// reference's own <c>o.BeginTransaction()</c>/<c>Commit()</c>/<c>Rollback()</c>... except the reference
+        /// itself has no explicit transaction here (a bare <c>DeletedPageRevisionsFactory.EphemeralAsync</c> call
+        /// with no <c>BeginTransaction</c>/<c>Commit</c>) - a transaction is still used here anyway, matching the
+        /// pattern established by every sibling move/restore method in this class
+        /// (<see cref="RestoreDeletedPageByPageId"/>/<see cref="MovePageRevisionToDeletedById"/>/
+        /// <see cref="MovePageToDeletedById"/>), since a multi-table copy-then-delete should not be allowed to
+        /// commit only partially. Flushes this page's cache via <see cref="FlushPageCache"/> afterward, same as
+        /// the SQLite reference.
+        /// </summary>
+        public async Task RestoreDeletedPageRevisionByPageIdAndRevision(int pageId, int revision)
+        {
+            using var context = _createContext();
+            using var transaction = await context.Database.BeginTransactionAsync();
+
+            try
+            {
+                var deletedRevision = await context.DeletedPageRevisions_PageRevisions.AsNoTracking()
+                    .FirstOrDefaultAsync(pr => pr.PageId == pageId && pr.Revision == revision);
+
+                if (deletedRevision != null)
+                {
+                    context.Pages_PageRevisions.Add(new PagesEntities.PageRevision
+                    {
+                        PageId = deletedRevision.PageId,
+                        Name = deletedRevision.Name,
+                        Namespace = deletedRevision.Namespace,
+                        Description = deletedRevision.Description,
+                        Body = deletedRevision.Body,
+                        Revision = deletedRevision.Revision,
+                        ChangeSummary = deletedRevision.ChangeSummary,
+                        ModifiedByUserId = deletedRevision.ModifiedByUserId,
+                        ModifiedDate = deletedRevision.ModifiedDate,
+                        DataHash = deletedRevision.DataHash,
+                    });
+                }
+
+                var deletedAttachments = await context.DeletedPageRevisions_PageRevisionAttachments.AsNoTracking()
+                    .Where(a => a.PageId == pageId && a.PageRevision == revision).ToListAsync();
+                context.Pages_PageRevisionAttachments.AddRange(deletedAttachments.Select(a => new PagesEntities.PageRevisionAttachment
+                {
+                    PageId = a.PageId,
+                    PageFileId = a.PageFileId,
+                    FileRevision = a.FileRevision,
+                    PageRevision = a.PageRevision,
+                }));
+
+                await context.SaveChangesAsync();
+
+                await context.DeletedPageRevisions_DeletionMetas.Where(dm => dm.PageId == pageId && dm.Revision == revision).ExecuteDeleteAsync();
+                await context.DeletedPageRevisions_PageRevisionAttachments.Where(a => a.PageId == pageId && a.PageRevision == revision).ExecuteDeleteAsync();
+                await context.DeletedPageRevisions_PageRevisions.Where(pr => pr.PageId == pageId && pr.Revision == revision).ExecuteDeleteAsync();
+
+                await transaction.CommitAsync();
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                throw;
+            }
+
+            await FlushPageCache(pageId);
+        }
+
+        /// <summary>
+        /// Mirrors GetDeletedPageRevisionById.sql: the single DeletedPageRevisions.PageRevision row matching
+        /// (<paramref name="pageId"/>, <paramref name="revision"/>), inner-joined to its own
+        /// DeletedPageRevisions.DeletionMeta row, LEFT OUTER JOINed to Users.Profile for the deleting user via the
+        /// existing <see cref="DeletedPageRevisionsEntities.DeletionMeta.DeletedByUser"/> navigation. Uses
+        /// <c>FirstOrDefaultAsync</c> rather than <c>SingleOrDefaultAsync</c>, matching the reference's own
+        /// <c>QueryFirstOrDefaultAsync</c> (both keys are already unique per their composite primary keys, so this
+        /// is a difference in defensive posture only, not in observable behavior).
+        /// </summary>
+        public async Task<TwDeletedPageRevision?> GetDeletedPageRevisionById(int pageId, int revision)
+        {
+            using var context = _createContext();
+
+            return await (from pr in context.DeletedPageRevisions_PageRevisions
+                           join dm in context.DeletedPageRevisions_DeletionMetas on new { pr.PageId, pr.Revision } equals new { dm.PageId, dm.Revision }
+                           where pr.PageId == pageId && pr.Revision == revision
+                           select new TwDeletedPageRevision
+                           {
+                               Id = pr.PageId,
+                               Name = pr.Name,
+                               Description = pr.Description,
+                               Revision = pr.Revision,
+                               Body = pr.Body,
+                               DeletedDate = dm.DeletedDate ?? default,
+                               DeletedByUserName = dm.DeletedByUser != null ? (dm.DeletedByUser.AccountName ?? string.Empty) : string.Empty,
+                           }).FirstOrDefaultAsync();
+        }
 
         /// <summary>
         /// Shared query behind both <see cref="GetPageRevisionByNavigation(TwNamespaceNavigation, int?)"/> and
@@ -2377,12 +3329,11 @@ namespace TightWiki.Data.EfCore.Repositories
         /// <see cref="ComputeParsedPageTokens"/>.
         /// </summary>
         /// <remarks>
-        /// This method - and the private <see cref="ComputeParsedPageTokens"/> helper it calls - have no
-        /// dependency on any of the still-<see cref="NotImplementedException"/> members of this class (in
-        /// particular, unlike <c>PageRepository.RefreshPageMetadata</c> - phase 2b.6, still a stub here - this
-        /// method never calls <see cref="UpsertPage"/>/<see cref="RefreshPageMetadata"/> itself, only the other
-        /// way around), so it is fully functional as of this phase even though its only real caller
-        /// (<see cref="RefreshPageMetadata"/>) is not yet implemented.
+        /// This method - and the private <see cref="ComputeParsedPageTokens"/> helper it calls - has no
+        /// dependency on <see cref="RefreshPageMetadata"/>/<see cref="UpsertPage"/> (only the other way around:
+        /// <see cref="RefreshPageMetadata"/> is this method's own caller), so it was already fully functional in
+        /// phase 2b.4 (when it landed) even though <see cref="RefreshPageMetadata"/> itself was still a
+        /// <see cref="NotImplementedException"/> stub at the time (implemented for real in phase 2b.6).
         /// </remarks>
         public async Task<List<TwAggregatedSearchToken>> ParsePageTokens(ITwEngineState state)
         {
