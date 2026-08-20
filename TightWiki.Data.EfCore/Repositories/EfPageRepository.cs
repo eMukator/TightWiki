@@ -2,6 +2,7 @@ using DuoVia.FuzzyStrings;
 using Microsoft.EntityFrameworkCore;
 using NTDLS.Helpers;
 using TightWiki.Library.Caching;
+using TightWiki.Library.Security;
 using TightWiki.Plugin;
 using TightWiki.Plugin.Interfaces;
 using TightWiki.Plugin.Interfaces.Repository;
@@ -22,7 +23,7 @@ namespace TightWiki.Data.EfCore.Repositories
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Still a partial skeleton (Database-Providers-Plan.md phase 2b.1-2b.5) - 31 of 86 members still throw
+    /// Still a partial skeleton (Database-Providers-Plan.md phase 2b.1-2b.6) - 26 of 86 members still throw
     /// <see cref="NotImplementedException"/>. The first 11 (autocomplete, page-cache flushing, page comments,
     /// current-page-editors) were implemented for real in phase 2b.2; a further 19 page/revision metadata-read
     /// members (<see cref="GetPageRevisionInfoById"/>, <see cref="GetPageNavigationByPageId"/>,
@@ -49,10 +50,16 @@ namespace TightWiki.Data.EfCore.Repositories
     /// <see cref="GetPageInfoByTags"/>, <see cref="GetPageInfoByTag"/>, and <see cref="UpdatePageTags"/> - see
     /// <see cref="GetFuzzyPageSearchTokens"/>'s remarks for the <c>TempSearchTerms</c>/fuzzy-fan-out substitution
     /// and <see cref="ComputeParsedPageTokens"/> for the DuoVia.FuzzyStrings Double Metaphone scoring, which - like
-    /// the SQLite reference - runs entirely in C#, not SQL) landed in phase 2b.5. Real LINQ-based implementations
-    /// of the rest (including the <c>TempTags</c>/<c>TempNamespaces</c>/<c>TempReferences</c>/<c>TempInstructions</c>
-    /// replacements discussed in chapter 4.4 that this phase's own tag/namespace methods didn't already cover)
-    /// land across phases 2b.6-2b.13.
+    /// the SQLite reference - runs entirely in C#, not SQL) landed in phase 2b.5. A further 5 CRUD/upsert members -
+    /// one of the most complex categories in the interface, transactional page save/orchestration -
+    /// (<see cref="UpsertPage"/>, <see cref="RefreshPageMetadata"/>, <see cref="UpdatePageProcessingInstructions"/>,
+    /// <see cref="UpdateSinglePageReference"/>, and <see cref="UpdatePageReferences"/> - see <see cref="SavePage"/>'s
+    /// remarks for the hash-based change detection/revision-bumping logic behind <see cref="UpsertPage"/>, and
+    /// <see cref="UpdatePageReferences"/>'s remarks for the <c>TempReferences</c> replacement and a confirmed,
+    /// deliberately-not-reproduced bug in the SQLite reference script) landed in phase 2b.6. Real LINQ-based
+    /// implementations of the rest (including the <c>TempTags</c>/<c>TempNamespaces</c>/<c>TempInstructions</c>
+    /// replacements discussed in chapter 4.4 that this phase's own tag/namespace/reference/instruction methods
+    /// didn't already cover) land across phases 2b.7-2b.13.
     /// </para>
     /// <para>
     /// Takes a <see cref="Func{TightWikiDbContext}"/> rather than an injected context instance, mirroring
@@ -1059,11 +1066,114 @@ namespace TightWiki.Data.EfCore.Repositories
                 }).ToListAsync();
         }
 
-        public Task UpdateSinglePageReference(string pageNavigation, int pageId)
-            => throw new NotImplementedException();
+        /// <summary>
+        /// Mirrors UpdateSinglePageReference.sql: resolves every existing Pages.PageReference row (across every
+        /// page, not just <paramref name="pageId"/>'s own outgoing references) whose
+        /// <see cref="PagesEntities.PageReference.ReferencesPageNavigation"/> matches <paramref name="pageNavigation"/>,
+        /// setting its <see cref="PagesEntities.PageReference.ReferencesPageId"/> to <paramref name="pageId"/> -
+        /// the "fix up orphaned references once the page they point to actually gets created" step
+        /// <see cref="UpsertPage"/> runs for newly-created pages. No transaction, matching the SQLite reference (a
+        /// bare single-statement <c>UPDATE</c>). Flushes this page's cache via <see cref="FlushPageCache"/>
+        /// afterward, same as the SQLite reference.
+        /// </summary>
+        public async Task UpdateSinglePageReference(string pageNavigation, int pageId)
+        {
+            using var context = _createContext();
 
-        public Task UpdatePageReferences(int pageId, List<TwPageReference> referencesPageNavigations)
-            => throw new NotImplementedException();
+            await context.PageReferences
+                .Where(pr => pr.ReferencesPageNavigation == pageNavigation)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(pr => pr.ReferencesPageId, pageId));
+
+            await FlushPageCache(pageId);
+        }
+
+        /// <summary>
+        /// Mirrors UpdatePageReferences.sql: replaces all Pages.PageReference rows for <paramref name="pageId"/>
+        /// (its own outgoing references) with <paramref name="referencesPageNavigations"/> (deduplicated -
+        /// <see cref="TwPageReference.Equals"/> compares <see cref="TwPageReference.Navigation"/>
+        /// case-insensitively, same as the reference's own <c>referencesPageNavigations.Distinct()</c> before
+        /// building <c>TempReferences</c>), wrapped in a single transaction (the reference's own <c>BEGIN
+        /// TRANSACTION</c>/<c>COMMIT TRANSACTION</c>) - delete-then-insert, not a diff/merge. Each inserted row's
+        /// <see cref="PagesEntities.PageReference.ReferencesPageId"/> is resolved via a <c>Contains(...)</c>
+        /// lookup against <see cref="PagesEntities.Page.Navigation"/> (the <c>TempReferences</c>
+        /// left-outer-join replacement, same pattern as <see cref="GetAllPagesPaged"/>'s remarks), materialized
+        /// into a case-insensitive dictionary since <see cref="PagesEntities.Page.Navigation"/> carries a
+        /// case-insensitive collation (<see cref="TightWiki.Data.EfCore.Configurations.Pages.PageReferenceConfiguration"/>) - left null when no page with
+        /// that navigation currently exists (an orphaned/broken reference, later resolved by
+        /// <see cref="UpdateSinglePageReference"/> if a page with that navigation is subsequently created).
+        /// <see cref="PagesEntities.PageReference.ReferencesPageName"/> is built as the reference script's own
+        /// <c>Coalesce(Ref.[Namespace] || ' :: ', '') || Ref.Name</c> - since <see cref="TwPageReference.Namespace"/>
+        /// is a non-nullable property that is always either empty or a real namespace (never literally null in
+        /// any reachable code path), this <c>Coalesce</c>'s null-branch is unreachable, so the literal,
+        /// faithfully-reproduced result always includes the <c>" :: "</c> separator, even for un-namespaced
+        /// references (a pre-existing, user-visible quirk of the reference script - e.g. a reference to a page
+        /// named "SandBox" with no namespace stores <c>" :: SandBox"</c>, not <c>"SandBox"</c> - preserved here
+        /// rather than "fixed", per this class's established convention of not correcting merely-odd-looking but
+        /// faithfully-reproducible reference behavior). An empty (post-dedup) <paramref name="referencesPageNavigations"/>
+        /// list still deletes the page's existing references (matching the reference's unconditional <c>DELETE
+        /// FROM PageReference WHERE PageId = @PageId</c>) and simply inserts nothing. Flushes this page's cache
+        /// via <see cref="FlushPageCache"/> afterward, same as the SQLite reference.
+        /// </summary>
+        /// <remarks>
+        /// <b>⚠ Confirmed bug in the SQLite reference, deliberately not reproduced here.</b> After the delete/insert
+        /// above, the reference script runs a second statement - <c>UPDATE PageReference SET
+        /// ReferencesPageNavigation = I.Navigation FROM (SELECT DISTINCT Id, P.Navigation FROM PageReference as PR
+        /// INNER JOIN [Page] as P ON P.Id = PR.ReferencesPageId WHERE P.Id = 77) AS I WHERE I.Id =
+        /// PageReference.ReferencesPageId</c> - a hardcoded, unparameterized literal <c>77</c> in place of what
+        /// every surrounding line of the same script (and the join it drives) makes clear should have been
+        /// <c>@PageId</c> (confirmed unchanged since the very first SQLite port of this script via <c>git log
+        /// --follow</c>, and unique to this one script - no other script in <c>TightWiki.Repository/Scripts/</c>
+        /// filters on a bare numeric literal this way, the same class of pre-existing bug documented on
+        /// <see cref="EfEmojiRepository.UpsertEmoji"/>'s own remarks). As written, this second statement is inert
+        /// for every real page save except the one-in-a-database-lifetime coincidence that a page with Id exactly
+        /// 77 is being referenced. The "evidently intended" fix reads as syncing
+        /// <see cref="PagesEntities.PageReference.ReferencesPageNavigation"/> on every <i>other</i> page's
+        /// reference <i>to</i> <paramref name="pageId"/> (e.g. after a rename) - but since this phase's task did
+        /// not ask for that behavior and it would be new, untested functionality beyond anything the reference
+        /// actually does for any real page today, it is not speculatively implemented here. This method
+        /// reproduces only the unambiguous delete/insert half of the script, which is a complete, faithful mirror
+        /// of the reference's real (non-dead-code) behavior.
+        /// </remarks>
+        public async Task UpdatePageReferences(int pageId, List<TwPageReference> referencesPageNavigations)
+        {
+            var distinctReferences = referencesPageNavigations.Distinct().ToList();
+
+            using var context = _createContext();
+            using var transaction = await context.Database.BeginTransactionAsync();
+
+            await context.PageReferences
+                .Where(pr => pr.PageId == pageId)
+                .ExecuteDeleteAsync();
+
+            if (distinctReferences.Count > 0)
+            {
+                var referencedNavigations = distinctReferences.Select(r => r.Navigation).ToList();
+
+                var resolvedPages = await context.Pages_Pages
+                    .Where(p => referencedNavigations.Contains(p.Navigation))
+                    .Select(p => new { p.Navigation, p.Id })
+                    .ToListAsync();
+
+                var resolvedPageIdByNavigation = resolvedPages
+                    .ToDictionary(p => p.Navigation, p => p.Id, StringComparer.OrdinalIgnoreCase);
+
+                context.PageReferences.AddRange(distinctReferences.Select(r => new PagesEntities.PageReference
+                {
+                    PageId = pageId,
+                    ReferencesPageName = r.Namespace + " :: " + r.Name,
+                    ReferencesPageNavigation = r.Navigation,
+                    ReferencesPageId = resolvedPageIdByNavigation.TryGetValue(r.Navigation, out var resolvedPageId)
+                        ? resolvedPageId
+                        : null,
+                }));
+
+                await context.SaveChangesAsync();
+            }
+
+            await transaction.CommitAsync();
+
+            await FlushPageCache(pageId);
+        }
 
         /// <summary>
         /// Mirrors GetAllPagesByInstructionPaged.sql: every Pages.Page row that has the given
@@ -1584,8 +1694,51 @@ namespace TightWiki.Data.EfCore.Repositories
             })).EnsureNotNull();
         }
 
-        public Task UpdatePageProcessingInstructions(int pageId, List<string> instructions)
-            => throw new NotImplementedException();
+        /// <summary>
+        /// Mirrors UpdatePageProcessingInstructions.sql: replaces all Pages.PageProcessingInstruction rows for
+        /// <paramref name="pageId"/> with <paramref name="instructions"/> (each lower-invarianted then
+        /// deduplicated - the reference's own <c>instructions.Select(o => o.ToLowerInvariant()).Distinct()</c>
+        /// before building <c>TempInstructions</c> - then dropping any entry that is null/empty, the reference
+        /// script's own <c>WHERE Coalesce(TI.[value], '') &lt;&gt; ''</c> insert-time filter), wrapped in a
+        /// single transaction (the reference's own <c>BEGIN TRANSACTION</c>/<c>COMMIT TRANSACTION</c>) -
+        /// delete-then-insert, not a diff/merge, same pattern as <see cref="UpdatePageTags"/>. An empty
+        /// (post-filtering) <paramref name="instructions"/> list still deletes the page's existing instructions
+        /// (matching the reference's unconditional <c>DELETE FROM PageProcessingInstruction WHERE PageId =
+        /// @PageId</c>) and simply inserts nothing. Unlike <see cref="UpdatePageTags"/>, flushes this page's
+        /// cache via <see cref="FlushPageCache"/> afterward - matching the SQLite reference, whose
+        /// <c>PageRepository.UpdatePageProcessingInstructions</c> (unlike <c>UpdatePageTags</c>'s) does call it
+        /// here.
+        /// </summary>
+        public async Task UpdatePageProcessingInstructions(int pageId, List<string> instructions)
+        {
+            var distinctInstructions = instructions
+                .Select(i => i.ToLowerInvariant())
+                .Distinct()
+                .Where(i => !string.IsNullOrEmpty(i))
+                .ToList();
+
+            using var context = _createContext();
+            using var transaction = await context.Database.BeginTransactionAsync();
+
+            await context.Pages_PageProcessingInstructions
+                .Where(pi => pi.PageId == pageId)
+                .ExecuteDeleteAsync();
+
+            if (distinctInstructions.Count > 0)
+            {
+                context.Pages_PageProcessingInstructions.AddRange(distinctInstructions.Select(i => new PagesEntities.PageProcessingInstruction
+                {
+                    PageId = pageId,
+                    Instruction = i,
+                }));
+
+                await context.SaveChangesAsync();
+            }
+
+            await transaction.CommitAsync();
+
+            await FlushPageCache(pageId);
+        }
 
         /// <summary>
         /// Mirrors GetPageRevisionById.sql: an inner join of Pages.Page to Pages.PageRevision for
@@ -2143,11 +2296,66 @@ namespace TightWiki.Data.EfCore.Repositories
             await transaction.CommitAsync();
         }
 
-        public Task<int> UpsertPage(ITwEngine wikifier, ITwSharedLocalizationText localizer, TwPage page, ITwSessionState? sessionState = null)
-            => throw new NotImplementedException();
+        /// <summary>
+        /// Mirrors <c>PageRepository.UpsertPage</c>: saves <paramref name="page"/> (and its revision history) via
+        /// <see cref="SavePage"/>, refreshes its tags/processing-instructions/search-tokens/outgoing-references
+        /// via <see cref="RefreshPageMetadata"/>, and - only when <paramref name="page"/>.Id was 0 on entry (a
+        /// brand-new page) - resolves any pre-existing orphaned Pages.PageReference rows that pointed at this
+        /// page's navigation before it existed, via <see cref="UpdateSinglePageReference"/>. Same three-step
+        /// orchestration, same order, as the SQLite reference.
+        /// </summary>
+        public async Task<int> UpsertPage(ITwEngine wikifier, ITwSharedLocalizationText localizer, TwPage page, ITwSessionState? sessionState = null)
+        {
+            bool isNewlyCreated = page.Id == 0;
 
-        public Task RefreshPageMetadata(ITwEngine wikifier, ITwSharedLocalizationText localizer, TwPage page, ITwSessionState? sessionState = null)
-            => throw new NotImplementedException();
+            page.Id = await SavePage(page);
+
+            await RefreshPageMetadata(wikifier, localizer, page, sessionState);
+
+            if (isNewlyCreated)
+            {
+                //This will update the PageId of references that have been saved to the navigation link.
+                await UpdateSinglePageReference(page.Navigation, page.Id);
+            }
+
+            return page.Id;
+        }
+
+        /// <summary>
+        /// Mirrors <c>PageRepository.RefreshPageMetadata</c>: re-transforms <paramref name="page"/> through
+        /// <paramref name="wikifier"/> (omitting <see cref="TwMatchType.StandardFunction"/> matches from
+        /// tokenization, same as the reference - function calls are too dynamic for static searching), then
+        /// rewrites this page's tags (<see cref="UpdatePageTags"/>), processing instructions
+        /// (<see cref="UpdatePageProcessingInstructions"/>), search tokens (<see cref="ParsePageTokens"/> +
+        /// <see cref="SavePageSearchTokens"/>), and outgoing references (<see cref="UpdatePageReferences"/>) from
+        /// the resulting <see cref="ITwEngineState"/>, then clears this page's cache under both its id and its
+        /// navigation - the same two <see cref="MemCache.ClearCategory(MemCacheKey)"/> calls as the SQLite
+        /// reference (in addition to whatever caches the individual Update*/Save* calls above already flush on
+        /// their own).
+        /// </summary>
+        public async Task RefreshPageMetadata(ITwEngine wikifier, ITwSharedLocalizationText localizer, TwPage page, ITwSessionState? sessionState = null)
+        {
+            //We omit function calls from the tokenization process because they are too dynamic for static searching.
+            var state = await wikifier.Transform(localizer, sessionState, page, null, [TwMatchType.StandardFunction]);
+
+            await UpdatePageTags(page.Id, state.Tags);
+            await UpdatePageProcessingInstructions(page.Id, state.ProcessingInstructions);
+
+            var pageTokens = (await ParsePageTokens(state)).Select(o =>
+                      new TwPageToken
+                      {
+                          PageId = page.Id,
+                          Token = o.Token,
+                          DoubleMetaphone = o.DoubleMetaphone,
+                          Weight = o.Weight
+                      }).ToList();
+
+            await SavePageSearchTokens(pageTokens);
+            await UpdatePageReferences(page.Id, state.OutgoingLinks);
+
+            MemCache.ClearCategory(MemCacheKey.Build(MemCache.Category.Page, [page.Id]));
+            MemCache.ClearCategory(MemCacheKey.Build(MemCache.Category.Page, [page.Navigation]));
+        }
 
         /// <summary>
         /// Mirrors <c>PageRepository.ParsePageTokens</c>: tokenizes <paramref name="state"/>'s rendered HTML,
@@ -2232,6 +2440,172 @@ namespace TightWiki.Data.EfCore.Repositories
                                  }).ToList();
 
             return searchTokens.Where(o => string.IsNullOrWhiteSpace(o.Token) == false).ToList();
+        }
+
+        /// <summary>
+        /// Creates a new page or updates an existing page and its revision history in the data store.
+        ///
+        /// DO NOT USE DIRECTLY: Use <see cref="UpsertPage"/> instead.
+        /// </summary>
+        /// <remarks>
+        /// Mirrors <c>PageRepository.SavePage</c>'s hash-based change detection and revision-bumping, one
+        /// transaction (the reference's own <c>o.BeginTransaction()</c>/<c>Commit()</c>/<c>Rollback()</c>) per
+        /// call:
+        /// <list type="number">
+        /// <item>A brand-new page (<paramref name="page"/>.Id == 0) is simply inserted (Revision hardcoded to 1,
+        /// matching CreatePage.sql), and is therefore always treated as "changed".</item>
+        /// <item>An existing page has its current, cached <see cref="TwPage.Revision"/>/<see cref="TwPage.DataHash"/>
+        /// read via <see cref="GetLimitedPageInfoByIdAndRevision"/> (throwing if the page can no longer be found,
+        /// same as the reference) <i>before</i> Pages.Page's mutable columns (Description/Name/Namespace/
+        /// Navigation/ModifiedByUserId/ModifiedDate - matching UpdatePage.sql's own column list exactly, and
+        /// deliberately excluding Revision, which is only ever bumped in step 3 below) are overwritten - "changed"
+        /// is then whichever of Name/Namespace/Description/ChangeSummary/DataHash (a CRC32 of
+        /// <paramref name="page"/>.Body, <see cref="TightWiki.Library.Security.SecurityUtility.Crc32(string)"/>,
+        /// same algorithm as the reference) differs from what was just read, all compared the same
+        /// ordinal/case-sensitive way in C# both here and in the reference (Dapper materializes the "current"
+        /// row into a <see cref="TwPage"/> first on that side too, so there is no SQL-collation involved in this
+        /// comparison on either side).</item>
+        /// <item>Only when "changed": the page's <see cref="PagesEntities.Page.Revision"/> is bumped
+        /// (UpdatePageRevisionNumber.sql), a new Pages.PageRevision snapshot row is inserted at that revision
+        /// number (InsertPageRevision.sql - its own reference script's <c>FROM [Page] WHERE Id = @PageId</c>
+        /// guard is not reproduced as a separate check, since by this point in the method the page is always
+        /// known to exist, having either just been inserted or already been read back above), and every
+        /// Pages.PageRevisionAttachment row still attached at the <i>previous</i> revision - only those whose
+        /// <see cref="PagesEntities.PageRevisionAttachment.FileRevision"/> still matches the file's own current
+        /// <see cref="PagesEntities.PageFile.Revision"/>, i.e. the file has not itself been separately replaced
+        /// since - is carried forward to the new revision (ReassociateAllPageAttachments.sql, via the existing
+        /// <see cref="PagesEntities.PageRevisionAttachment.PageFile"/> navigation rather than a manual join; a
+        /// no-op for a brand-new page, which has no attachment rows yet at "revision 0").</item>
+        /// </list>
+        /// Unlike <paramref name="page"/>.Navigation - which callers are expected to have already resolved via
+        /// <see cref="TwNamespaceNavigation.CleanAndValidate"/> before calling <see cref="UpsertPage"/>, same as
+        /// the reference (<paramref name="page"/>.Navigation is read here but never written back onto
+        /// <paramref name="page"/> itself) - the value actually written to
+        /// <see cref="PagesEntities.Page.Navigation"/>/<see cref="PagesEntities.PageRevision.Namespace"/> is
+        /// (re)computed from <paramref name="page"/>.Name via <see cref="TwNamespaceNavigation.CleanAndValidate"/>
+        /// on every save, matching the reference's own <c>pageUpsertParam.Navigation</c>.
+        /// </remarks>
+        private async Task<int> SavePage(TwPage page)
+        {
+            var navigation = TwNamespaceNavigation.CleanAndValidate(page.Name);
+            var newDataHash = SecurityUtility.Crc32(page.Body ?? string.Empty);
+            var now = DateTime.UtcNow;
+
+            using var context = _createContext();
+            using var transaction = await context.Database.BeginTransactionAsync();
+
+            try
+            {
+                int currentPageRevision = 0;
+                bool hasPageChanged;
+
+                if (page.Id == 0)
+                {
+                    //This is a new page, just insert it.
+                    var newPage = new PagesEntities.Page
+                    {
+                        Name = page.Name,
+                        Namespace = page.Namespace,
+                        Description = page.Description,
+                        Navigation = navigation,
+                        Revision = 1,
+                        CreatedByUserId = page.CreatedByUserId,
+                        CreatedDate = page.CreatedDate,
+                        ModifiedByUserId = page.ModifiedByUserId,
+                        ModifiedDate = now,
+                    };
+
+                    context.Pages_Pages.Add(newPage);
+                    await context.SaveChangesAsync();
+
+                    page.Id = newPage.Id;
+                    hasPageChanged = true;
+                }
+                else
+                {
+                    //Get current page so we can determine if anything has changed.
+                    var currentRevisionInfo = await GetLimitedPageInfoByIdAndRevision(page.Id)
+                        ?? throw new Exception("The page could not be found.");
+
+                    currentPageRevision = currentRevisionInfo.Revision;
+
+                    //Update the existing page.
+                    await context.Pages_Pages
+                        .Where(p => p.Id == page.Id)
+                        .ExecuteUpdateAsync(setters => setters
+                            .SetProperty(p => p.Description, page.Description)
+                            .SetProperty(p => p.Name, page.Name)
+                            .SetProperty(p => p.Namespace, page.Namespace)
+                            .SetProperty(p => p.Navigation, navigation)
+                            .SetProperty(p => p.ModifiedByUserId, page.ModifiedByUserId)
+                            .SetProperty(p => p.ModifiedDate, now));
+
+                    //Determine if anything has actually changed.
+                    hasPageChanged = currentRevisionInfo.Name != page.Name
+                        || currentRevisionInfo.Namespace != page.Namespace
+                        || currentRevisionInfo.Description != page.Description
+                        || currentRevisionInfo.ChangeSummary != page.ChangeSummary
+                        || currentRevisionInfo.DataHash != newDataHash;
+                }
+
+                if (hasPageChanged)
+                {
+                    var previousPageRevision = currentPageRevision;
+                    currentPageRevision++;
+
+                    //The page content has actually changed (according to the checksum), so we will bump the page revision.
+                    await context.Pages_Pages
+                        .Where(p => p.Id == page.Id)
+                        .ExecuteUpdateAsync(setters => setters.SetProperty(p => p.Revision, currentPageRevision));
+
+                    //Insert the new actual page revision entry (this is the data).
+                    context.Pages_PageRevisions.Add(new PagesEntities.PageRevision
+                    {
+                        PageId = page.Id,
+                        Name = page.Name,
+                        Namespace = page.Namespace,
+                        Description = page.Description,
+                        Body = page.Body ?? string.Empty,
+                        DataHash = newDataHash,
+                        Revision = currentPageRevision,
+                        ChangeSummary = page.ChangeSummary ?? string.Empty,
+                        ModifiedByUserId = page.ModifiedByUserId,
+                        ModifiedDate = now,
+                    });
+
+                    await context.SaveChangesAsync();
+
+                    //Associate all page attachments that are still current with the latest revision.
+                    var carriedAttachments = await context.Pages_PageRevisionAttachments
+                        .Where(pra => pra.PageId == page.Id
+                            && pra.PageRevision == previousPageRevision
+                            && pra.PageFile.Revision == pra.FileRevision)
+                        .Select(pra => new { pra.PageFileId, pra.FileRevision })
+                        .ToListAsync();
+
+                    if (carriedAttachments.Count > 0)
+                    {
+                        context.Pages_PageRevisionAttachments.AddRange(carriedAttachments.Select(a => new PagesEntities.PageRevisionAttachment
+                        {
+                            PageId = page.Id,
+                            PageFileId = a.PageFileId,
+                            FileRevision = a.FileRevision,
+                            PageRevision = currentPageRevision,
+                        }));
+
+                        await context.SaveChangesAsync();
+                    }
+                }
+
+                await transaction.CommitAsync();
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                throw;
+            }
+
+            return page.Id;
         }
 
         #region Page File.
