@@ -21,7 +21,7 @@ namespace TightWiki.Data.EfCore.Repositories
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Still a partial skeleton (Database-Providers-Plan.md phase 2b.1-2b.3) - 56 of 86 members still throw
+    /// Still a partial skeleton (Database-Providers-Plan.md phase 2b.1-2b.4) - 46 of 86 members still throw
     /// <see cref="NotImplementedException"/>. The first 11 (autocomplete, page-cache flushing, page comments,
     /// current-page-editors) were implemented for real in phase 2b.2; a further 19 page/revision metadata-read
     /// members (<see cref="GetPageRevisionInfoById"/>, <see cref="GetPageNavigationByPageId"/>,
@@ -33,8 +33,16 @@ namespace TightWiki.Data.EfCore.Repositories
     /// <see cref="GetPageNextRevision"/>, <see cref="GetPagePreviousRevision"/>, <see cref="GetPageRevisionById"/>,
     /// <see cref="GetLatestPageRevisionById"/>, both <see cref="GetPageRevisionByNavigation(TwNamespaceNavigation, int?)"/>
     /// overloads, and <see cref="GetCountOfPageAttachmentsById"/> - see each method's own doc comment for the
-    /// specific SQLite script it mirrors) landed in phase 2b.3. Real LINQ-based implementations of the rest
-    /// (including the <c>TempSearchTerms</c> replacement discussed in chapter 4.4) land across phases 2b.4-2b.13.
+    /// specific SQLite script it mirrors) landed in phase 2b.3. A further 10 bulk/paged-listing members
+    /// (<see cref="GetMissingPagesPaged"/>, <see cref="GetAllPagesByInstructionPaged"/>,
+    /// <see cref="GetAllNamespacePagesPaged"/>, <see cref="GetAllPagesPaged"/>, <see cref="GetAllDeletedPagesPaged"/>,
+    /// <see cref="GetAllNamespacesPaged"/>, <see cref="GetAllNamespaces"/>, <see cref="GetAllPages"/>,
+    /// <see cref="GetAllTemplatePages"/>, and <see cref="GetAllFeatureTemplates"/> - see
+    /// <see cref="GetAllPagesPaged"/>'s remarks for the <c>TempPageIds</c>/<c>list.Contains(...)</c> temp-table
+    /// replacement pattern introduced here and reused in later phases) landed in phase 2b.4. Real LINQ-based
+    /// implementations of the rest (including the <c>TempTokens</c>/<c>TempTags</c>/<c>TempNamespaces</c>/
+    /// <c>TempReferences</c>/<c>TempInstructions</c> replacements discussed in chapter 4.4) land across phases
+    /// 2b.5-2b.13.
     /// </para>
     /// <para>
     /// Takes a <see cref="Func{TightWikiDbContext}"/> rather than an injected context instance, mirroring
@@ -557,8 +565,57 @@ namespace TightWiki.Data.EfCore.Repositories
             })).EnsureNotNull();
         }
 
-        public Task<List<TwNonexistentPage>> GetMissingPagesPaged(int pageNumber, string? orderBy = null, string? orderByDirection = null)
-            => throw new NotImplementedException();
+        /// <summary>
+        /// Mirrors GetMissingPagesPaged.sql: every Pages.PageReference row whose target does not resolve to an
+        /// existing page (<see cref="PagesEntities.PageReference.ReferencesPageId"/> is null), read via the
+        /// existing, required <see cref="PagesEntities.PageReference.Page"/> navigation for the source page's
+        /// fields rather than a manual join. Paginated by the "Pagination Size" customization setting, same as the
+        /// reference, and <see cref="TwNonexistentPage.PaginationPageCount"/> is computed via the reference's own
+        /// ceiling-division formula against the total (unpaginated) count of broken references. Ordering mirrors
+        /// <c>RepositoryHelpers.TransposeOrderby</c> against the script's <c>--CONFIG::</c> mapping ("SourcePage"/
+        /// "TargetPage"): no <paramref name="orderBy"/> falls back to the script's own un-transposed "ORDER BY
+        /// P.[Name]" (always ascending, ignoring <paramref name="orderByDirection"/> - a literal quirk of the
+        /// reference script, which hardcodes no direction on its own default ORDER BY); an unrecognized
+        /// <paramref name="orderBy"/> throws, same pattern as <c>RepositoryHelpers.TransposeOrderby</c>'s "No
+        /// order by mapping..." exception (see <see cref="GetPageRevisionsInfoByNavigationPaged"/> for the
+        /// existing convention this follows).
+        /// </summary>
+        public async Task<List<TwNonexistentPage>> GetMissingPagesPaged(int pageNumber, string? orderBy = null, string? orderByDirection = null)
+        {
+            var paginationSize = await _configurationRepository.Get<int>(TwConfigGroup.Customization, "Pagination Size");
+
+            using var context = _createContext();
+
+            var query = context.PageReferences.Where(pr => pr.ReferencesPageId == null);
+
+            var totalCount = await query.CountAsync();
+            var paginationPageCount = (totalCount + (paginationSize - 1)) / paginationSize;
+
+            bool ascending = string.Equals(orderByDirection, "asc", StringComparison.InvariantCultureIgnoreCase);
+
+            var ordered = string.IsNullOrEmpty(orderBy)
+                ? query.OrderBy(pr => pr.Page.Name)
+                : orderBy.ToUpperInvariant() switch
+                {
+                    "SOURCEPAGE" => ascending ? query.OrderBy(pr => pr.Page.Name) : query.OrderByDescending(pr => pr.Page.Name),
+                    "TARGETPAGE" => ascending ? query.OrderBy(pr => pr.ReferencesPageName) : query.OrderByDescending(pr => pr.ReferencesPageName),
+                    _ => throw new InvalidOperationException(
+                        $"No order by mapping was found in 'GetMissingPagesPaged.sql' for the field '{orderBy}'."),
+                };
+
+            return await ordered
+                .Skip((pageNumber - 1) * paginationSize)
+                .Take(paginationSize)
+                .Select(pr => new TwNonexistentPage
+                {
+                    SourcePageId = pr.PageId,
+                    SourcePageName = pr.Page.Name,
+                    SourcePageNavigation = pr.Page.Navigation,
+                    TargetPageName = pr.ReferencesPageName,
+                    TargetPageNavigation = pr.ReferencesPageNavigation,
+                    PaginationPageCount = paginationPageCount,
+                }).ToListAsync();
+        }
 
         public Task UpdateSinglePageReference(string pageNavigation, int pageId)
             => throw new NotImplementedException();
@@ -566,8 +623,57 @@ namespace TightWiki.Data.EfCore.Repositories
         public Task UpdatePageReferences(int pageId, List<TwPageReference> referencesPageNavigations)
             => throw new NotImplementedException();
 
-        public Task<List<TwPage>> GetAllPagesByInstructionPaged(int pageNumber, string? instruction = null)
-            => throw new NotImplementedException();
+        /// <summary>
+        /// Mirrors GetAllPagesByInstructionPaged.sql: every Pages.Page row that has the given
+        /// <paramref name="instruction"/> recorded in Pages.PageProcessingInstruction, read via the existing,
+        /// required <see cref="PagesEntities.PageProcessingInstruction.Page"/> navigation rather than a manual
+        /// join, with <see cref="TwPage.CreatedByUserName"/>/<see cref="TwPage.ModifiedByUserName"/> resolved via
+        /// the existing <see cref="PagesEntities.Page.CreatedByUser"/>/<see cref="PagesEntities.Page.ModifiedByUser"/>
+        /// navigations rather than the script's own cross-database <c>o.Attach("users.db", "users_db")</c> (both
+        /// schemas already live in the same <see cref="TightWikiDbContext"/>). When <paramref name="instruction"/>
+        /// is null, no rows match - EF Core rewrites the equality against a null parameter into a null-safe
+        /// comparison, and <see cref="PagesEntities.PageProcessingInstruction.Instruction"/> is a <c>NOT NULL</c>
+        /// column, same net effect as the reference script's literal <c>WHERE PPI.Instruction = @Instruction</c>
+        /// with a null parameter. Ordered by <see cref="PagesEntities.Page.Name"/> then
+        /// <see cref="PagesEntities.Page.Id"/> ascending (this method takes no <c>orderBy</c> parameter - the
+        /// reference script has no <c>--CUSTOM_ORDER_BEGIN::</c> section), paginated by the "Pagination Size"
+        /// customization setting. <see cref="TwPage.PaginationPageCount"/> is computed via the reference's own
+        /// ceiling-division formula against the total (unpaginated) count of matching pages.
+        /// </summary>
+        public async Task<List<TwPage>> GetAllPagesByInstructionPaged(int pageNumber, string? instruction = null)
+        {
+            var paginationSize = await _configurationRepository.Get<int>(TwConfigGroup.Customization, "Pagination Size");
+
+            using var context = _createContext();
+
+            var query = context.Pages_PageProcessingInstructions
+                .Where(pi => pi.Instruction == instruction)
+                .Select(pi => pi.Page);
+
+            var totalCount = await query.CountAsync();
+            var paginationPageCount = (totalCount + (paginationSize - 1)) / paginationSize;
+
+            return await query
+                .OrderBy(p => p.Name)
+                .ThenBy(p => p.Id)
+                .Skip((pageNumber - 1) * paginationSize)
+                .Take(paginationSize)
+                .Select(p => new TwPage
+                {
+                    Id = p.Id,
+                    Name = p.Name,
+                    Navigation = p.Navigation,
+                    Description = p.Description,
+                    Revision = p.Revision,
+                    CreatedByUserId = p.CreatedByUserId,
+                    CreatedDate = p.CreatedDate,
+                    ModifiedByUserId = p.ModifiedByUserId,
+                    ModifiedDate = p.ModifiedDate,
+                    CreatedByUserName = p.CreatedByUser != null ? (p.CreatedByUser.AccountName ?? string.Empty) : string.Empty,
+                    ModifiedByUserName = p.ModifiedByUser != null ? (p.ModifiedByUser.AccountName ?? string.Empty) : string.Empty,
+                    PaginationPageCount = paginationPageCount,
+                }).ToListAsync();
+        }
 
         public Task<List<int>> GetDeletedPageIdsByTokens(List<string>? tokens)
             => throw new NotImplementedException();
@@ -575,29 +681,402 @@ namespace TightWiki.Data.EfCore.Repositories
         public Task<List<int>> GetPageIdsByTokens(List<string>? tokens)
             => throw new NotImplementedException();
 
-        public Task<List<TwPage>> GetAllNamespacePagesPaged(int pageNumber, string namespaceName, string? orderBy = null, string? orderByDirection = null)
-            => throw new NotImplementedException();
+        /// <summary>
+        /// Mirrors GetAllNamespacePagesPaged.sql: every Pages.Page row whose <see cref="PagesEntities.Page.Namespace"/>
+        /// matches <paramref name="namespaceName"/>, with <see cref="TwPage.CreatedByUserName"/>/
+        /// <see cref="TwPage.ModifiedByUserName"/> resolved via the existing <see cref="PagesEntities.Page.CreatedByUser"/>/
+        /// <see cref="PagesEntities.Page.ModifiedByUser"/> navigations rather than a raw cross-database
+        /// <c>ATTACH</c>, same substitution as <see cref="GetAllPagesByInstructionPaged"/>. Paginated by the
+        /// "Pagination Size" customization setting; <see cref="TwPage.PaginationPageCount"/> is computed via the
+        /// reference's own ceiling-division formula against the total (unpaginated) count of pages in the
+        /// namespace. Ordering mirrors <c>RepositoryHelpers.TransposeOrderby</c> against the script's
+        /// <c>--CONFIG::</c> mapping ("Name"/"Revision"/"ModifiedBy"/"ModifiedDate"): no <paramref name="orderBy"/>
+        /// falls back to the script's own un-transposed "ORDER BY P.[Name]" (always ascending, same quirk as
+        /// <see cref="GetMissingPagesPaged"/>); an unrecognized <paramref name="orderBy"/> throws, same pattern as
+        /// <see cref="GetPageRevisionsInfoByNavigationPaged"/>.
+        /// </summary>
+        public async Task<List<TwPage>> GetAllNamespacePagesPaged(int pageNumber, string namespaceName, string? orderBy = null, string? orderByDirection = null)
+        {
+            var paginationSize = await _configurationRepository.Get<int>(TwConfigGroup.Customization, "Pagination Size");
 
-        public Task<List<TwPage>> GetAllPagesPaged(int pageNumber, string? orderBy = null, string? orderByDirection = null, List<string>? searchTerms = null)
-            => throw new NotImplementedException();
+            using var context = _createContext();
 
-        public Task<List<TwPage>> GetAllDeletedPagesPaged(int pageNumber, string? orderBy = null, string? orderByDirection = null, List<string>? searchTerms = null)
-            => throw new NotImplementedException();
+            var query = context.Pages_Pages.Where(p => p.Namespace == namespaceName);
 
-        public Task<List<TwNamespaceStat>> GetAllNamespacesPaged(int pageNumber, string? orderBy = null, string? orderByDirection = null)
-            => throw new NotImplementedException();
+            var totalCount = await query.CountAsync();
+            var paginationPageCount = (totalCount + (paginationSize - 1)) / paginationSize;
 
-        public Task<List<string>> GetAllNamespaces()
-            => throw new NotImplementedException();
+            bool ascending = string.Equals(orderByDirection, "asc", StringComparison.InvariantCultureIgnoreCase);
 
-        public Task<List<TwPage>> GetAllPages()
-            => throw new NotImplementedException();
+            var ordered = string.IsNullOrEmpty(orderBy)
+                ? query.OrderBy(p => p.Name)
+                : orderBy.ToUpperInvariant() switch
+                {
+                    "NAME" => ascending ? query.OrderBy(p => p.Name) : query.OrderByDescending(p => p.Name),
+                    "REVISION" => ascending ? query.OrderBy(p => p.Revision) : query.OrderByDescending(p => p.Revision),
+                    "MODIFIEDBY" => ascending
+                        ? query.OrderBy(p => p.ModifiedByUser != null ? p.ModifiedByUser.AccountName : null)
+                        : query.OrderByDescending(p => p.ModifiedByUser != null ? p.ModifiedByUser.AccountName : null),
+                    "MODIFIEDDATE" => ascending ? query.OrderBy(p => p.ModifiedDate) : query.OrderByDescending(p => p.ModifiedDate),
+                    _ => throw new InvalidOperationException(
+                        $"No order by mapping was found in 'GetAllNamespacePagesPaged.sql' for the field '{orderBy}'."),
+                };
 
-        public Task<List<TwPage>> GetAllTemplatePages()
-            => throw new NotImplementedException();
+            return await ordered
+                .Skip((pageNumber - 1) * paginationSize)
+                .Take(paginationSize)
+                .Select(p => new TwPage
+                {
+                    Id = p.Id,
+                    Name = p.Name,
+                    Navigation = p.Navigation,
+                    Description = p.Description,
+                    Revision = p.Revision,
+                    CreatedByUserId = p.CreatedByUserId,
+                    CreatedDate = p.CreatedDate,
+                    ModifiedByUserId = p.ModifiedByUserId,
+                    ModifiedDate = p.ModifiedDate,
+                    CreatedByUserName = p.CreatedByUser != null ? (p.CreatedByUser.AccountName ?? string.Empty) : string.Empty,
+                    ModifiedByUserName = p.ModifiedByUser != null ? (p.ModifiedByUser.AccountName ?? string.Empty) : string.Empty,
+                    PaginationPageCount = paginationPageCount,
+                }).ToListAsync();
+        }
 
-        public Task<List<TwFeatureTemplate>> GetAllFeatureTemplates()
-            => throw new NotImplementedException();
+        /// <summary>
+        /// Mirrors GetAllPagesPaged.sql (and, when <paramref name="searchTerms"/> is non-empty,
+        /// GetAllPagesByPageIdPaged.sql): every Pages.Page row, with <see cref="TwPage.CreatedByUserName"/>/
+        /// <see cref="TwPage.ModifiedByUserName"/> resolved via the existing <see cref="PagesEntities.Page.CreatedByUser"/>/
+        /// <see cref="PagesEntities.Page.ModifiedByUser"/> navigations rather than the scripts' own cross-database
+        /// <c>o.Attach("users.db", "users_db")</c> (both schemas already live in the same
+        /// <see cref="TightWikiDbContext"/>). <see cref="TwPage.DeletedRevisionCount"/> is computed the same way
+        /// as both scripts' own correlated subquery against DeletedPageRevisions.PageRevision, resolved here via
+        /// <see cref="TightWikiDbContext.DeletedPageRevisions_PageRevisions"/> rather than the scripts' own
+        /// <c>o.Attach("deletedpagerevisions.db", "deletedpagerevisions_db")</c> - same cross-schema-navigation
+        /// substitution, just against a schema with no navigation property defined for this particular
+        /// relationship.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>TempPageIds replacement (Database-Providers-Plan.md chapter 4.4/8):</b> the reference implementation
+        /// resolves <paramref name="searchTerms"/> to a list of matching page IDs via
+        /// <see cref="GetPageIdsByTokens"/> (itself backed by a <c>TempTokens</c> temp table - out of scope for
+        /// this method, landing in phase 2b.5), then feeds that ID list into GetAllPagesByPageIdPaged.sql via a
+        /// second temp table, <c>CreateTempTableFrom("TempPageIds", pageIds)</c>, so the SQL can do
+        /// <c>WHERE P.Id IN (SELECT PID.Value FROM TempPageIds as PID)</c>. EF Core/SQL Server has no equivalent
+        /// concept of an ad-hoc session-scoped temp table reachable from LINQ, so this is replaced with the
+        /// simplest portable equivalent: keep <c>pageIds</c> as a plain in-memory <see cref="List{T}"/> of
+        /// <see cref="int"/> and filter with <c>pageIds.Contains(p.Id)</c> directly in the LINQ query. EF Core
+        /// translates this to a parameterized <c>WHERE p.Id IN (...)</c> (or an equivalent translation for large
+        /// lists), which is functionally equivalent to the temp table's own <c>IN (SELECT ... FROM TempPageIds)</c>
+        /// for a plain "is this ID in the set" filter - just without a physical table backing the set. This same
+        /// <c>list.Contains(...)</c> pattern is the one to reuse for every other <c>CreateTempTableFrom</c> call in
+        /// the reference (<c>TempTokens</c>, <c>TempTags</c>, <c>TempNamespaces</c>, <c>TempReferences</c>,
+        /// <c>TempInstructions</c> - phases 2b.5/2b.6).
+        /// </para>
+        /// <para>
+        /// Since <see cref="GetPageIdsByTokens"/> is still a <see cref="NotImplementedException"/> stub as of this
+        /// phase, calling it here means the <paramref name="searchTerms"/>-filtered path of this method currently
+        /// throws rather than returning filtered results - a known, documented limitation of phase 2b.4. The
+        /// no-<paramref name="searchTerms"/> path (the common case, and the one exercised by every existing
+        /// caller/test as of this phase) is fully functional. Once <see cref="GetPageIdsByTokens"/> is implemented
+        /// (phase 2b.5), this method's <paramref name="searchTerms"/> path starts working with no further changes
+        /// needed here.
+        /// </para>
+        /// <para>
+        /// Ordering mirrors <c>RepositoryHelpers.TransposeOrderby</c> against the scripts' shared <c>--CONFIG::</c>
+        /// mapping ("DeletedRevisions"/"Name"/"Revision"/"ModifiedBy"/"ModifiedDate"): no <paramref name="orderBy"/>
+        /// falls back to the scripts' own un-transposed "ORDER BY P.[Name]" (always ascending, same quirk as
+        /// <see cref="GetMissingPagesPaged"/>); an unrecognized <paramref name="orderBy"/> throws, same pattern as
+        /// <see cref="GetPageRevisionsInfoByNavigationPaged"/>. Paginated by the "Pagination Size" customization
+        /// setting; <see cref="TwPage.PaginationPageCount"/> is computed via the scripts' own ceiling-division
+        /// formula against the total (unpaginated, but already ID-filtered when <paramref name="searchTerms"/> is
+        /// given) page count.
+        /// </para>
+        /// </remarks>
+        public async Task<List<TwPage>> GetAllPagesPaged(int pageNumber, string? orderBy = null, string? orderByDirection = null, List<string>? searchTerms = null)
+        {
+            var paginationSize = await _configurationRepository.Get<int>(TwConfigGroup.Customization, "Pagination Size");
+
+            List<int>? pageIds = null;
+            if (searchTerms?.Count > 0)
+            {
+                pageIds = await GetPageIdsByTokens(searchTerms);
+            }
+
+            using var context = _createContext();
+
+            IQueryable<PagesEntities.Page> query = context.Pages_Pages;
+
+            if (pageIds != null)
+            {
+                query = query.Where(p => pageIds.Contains(p.Id));
+            }
+
+            var totalCount = await query.CountAsync();
+            var paginationPageCount = (totalCount + (paginationSize - 1)) / paginationSize;
+
+            bool ascending = string.Equals(orderByDirection, "asc", StringComparison.InvariantCultureIgnoreCase);
+
+            var ordered = string.IsNullOrEmpty(orderBy)
+                ? query.OrderBy(p => p.Name)
+                : orderBy.ToUpperInvariant() switch
+                {
+                    "DELETEDREVISIONS" => ascending
+                        ? query.OrderBy(p => context.DeletedPageRevisions_PageRevisions.Count(pr => pr.PageId == p.Id))
+                        : query.OrderByDescending(p => context.DeletedPageRevisions_PageRevisions.Count(pr => pr.PageId == p.Id)),
+                    "NAME" => ascending ? query.OrderBy(p => p.Name) : query.OrderByDescending(p => p.Name),
+                    "REVISION" => ascending ? query.OrderBy(p => p.Revision) : query.OrderByDescending(p => p.Revision),
+                    "MODIFIEDBY" => ascending
+                        ? query.OrderBy(p => p.ModifiedByUser != null ? p.ModifiedByUser.AccountName : null)
+                        : query.OrderByDescending(p => p.ModifiedByUser != null ? p.ModifiedByUser.AccountName : null),
+                    "MODIFIEDDATE" => ascending ? query.OrderBy(p => p.ModifiedDate) : query.OrderByDescending(p => p.ModifiedDate),
+                    _ => throw new InvalidOperationException(
+                        $"No order by mapping was found in 'GetAllPagesPaged.sql' for the field '{orderBy}'."),
+                };
+
+            return await ordered
+                .Skip((pageNumber - 1) * paginationSize)
+                .Take(paginationSize)
+                .Select(p => new TwPage
+                {
+                    Id = p.Id,
+                    Name = p.Name,
+                    Navigation = p.Navigation,
+                    Description = p.Description,
+                    Revision = p.Revision,
+                    CreatedByUserId = p.CreatedByUserId,
+                    CreatedDate = p.CreatedDate,
+                    ModifiedByUserId = p.ModifiedByUserId,
+                    ModifiedDate = p.ModifiedDate,
+                    CreatedByUserName = p.CreatedByUser != null ? (p.CreatedByUser.AccountName ?? string.Empty) : string.Empty,
+                    ModifiedByUserName = p.ModifiedByUser != null ? (p.ModifiedByUser.AccountName ?? string.Empty) : string.Empty,
+                    DeletedRevisionCount = context.DeletedPageRevisions_PageRevisions.Count(pr => pr.PageId == p.Id),
+                    PaginationPageCount = paginationPageCount,
+                }).ToListAsync();
+        }
+
+        /// <summary>
+        /// Mirrors GetAllDeletedPagesPaged.sql (and, when <paramref name="searchTerms"/> is non-empty,
+        /// GetAllDeletedPagesByPageIdPaged.sql): every DeletedPages.Page row, inner-joined to its
+        /// DeletedPages.DeletionMeta row - a manual join (no navigation property exists between the two entities),
+        /// matching the scripts' own <c>INNER JOIN DeletionMeta as DM ON DM.PageId = P.Id</c> - LEFT OUTER JOINed
+        /// to Users.Profile three times (creator, modifier, deleter) via the existing
+        /// <see cref="DeletedPagesEntities.Page.CreatedByUser"/>/<see cref="DeletedPagesEntities.Page.ModifiedByUser"/>/
+        /// <see cref="DeletedPagesEntities.DeletionMeta.DeletedByUser"/> navigations rather than the scripts' own
+        /// cross-database <c>ATTACH</c>. <paramref name="searchTerms"/> is resolved to a page-ID filter the same
+        /// way, and with the same <c>TempPageIds</c>-replacement caveat (delegates to the still-unimplemented
+        /// <see cref="GetDeletedPageIdsByTokens"/>), as documented on <see cref="GetAllPagesPaged"/> - see that
+        /// method's remarks for the full explanation of the <c>list.Contains(...)</c> substitution pattern.
+        /// Ordering mirrors <c>RepositoryHelpers.TransposeOrderby</c> against the scripts' shared <c>--CONFIG::</c>
+        /// mapping ("Page"): no <paramref name="orderBy"/> falls back to the scripts' own un-transposed "ORDER BY
+        /// P.[Name]" (always ascending, same quirk as <see cref="GetMissingPagesPaged"/>); an unrecognized
+        /// <paramref name="orderBy"/> throws, same pattern as <see cref="GetPageRevisionsInfoByNavigationPaged"/>.
+        /// Paginated by the "Pagination Size" customization setting; <see cref="TwPage.PaginationPageCount"/> is
+        /// computed via the scripts' own ceiling-division formula against the total (unpaginated, but already
+        /// ID-filtered when <paramref name="searchTerms"/> is given) deleted-page count.
+        /// <see cref="TwPage.DeletedByUserId"/> is deliberately left unset here - a literal quirk of both
+        /// reference scripts, which select <c>DeletedUser.AccountName as DeletedByUserName</c> but never the raw
+        /// <c>DM.DeletedByUserID</c> column itself.
+        /// </summary>
+        public async Task<List<TwPage>> GetAllDeletedPagesPaged(int pageNumber, string? orderBy = null, string? orderByDirection = null, List<string>? searchTerms = null)
+        {
+            var paginationSize = await _configurationRepository.Get<int>(TwConfigGroup.Customization, "Pagination Size");
+
+            List<int>? pageIds = null;
+            if (searchTerms?.Count > 0)
+            {
+                pageIds = await GetDeletedPageIdsByTokens(searchTerms);
+            }
+
+            using var context = _createContext();
+
+            var joined = from p in context.DeletedPages_Pages
+                         join dm in context.DeletedPages_DeletionMetas on p.Id equals dm.PageId
+                         select new { p, dm };
+
+            if (pageIds != null)
+            {
+                joined = joined.Where(x => pageIds.Contains(x.p.Id));
+            }
+
+            var totalCount = await joined.CountAsync();
+            var paginationPageCount = (totalCount + (paginationSize - 1)) / paginationSize;
+
+            bool ascending = string.Equals(orderByDirection, "asc", StringComparison.InvariantCultureIgnoreCase);
+
+            var ordered = string.IsNullOrEmpty(orderBy)
+                ? joined.OrderBy(x => x.p.Name)
+                : orderBy.ToUpperInvariant() switch
+                {
+                    "PAGE" => ascending ? joined.OrderBy(x => x.p.Name) : joined.OrderByDescending(x => x.p.Name),
+                    _ => throw new InvalidOperationException(
+                        $"No order by mapping was found in 'GetAllDeletedPagesPaged.sql' for the field '{orderBy}'."),
+                };
+
+            return await ordered
+                .Skip((pageNumber - 1) * paginationSize)
+                .Take(paginationSize)
+                .Select(x => new TwPage
+                {
+                    Id = x.p.Id,
+                    Name = x.p.Name,
+                    Navigation = x.p.Navigation,
+                    Description = x.p.Description,
+                    Revision = x.p.Revision,
+                    CreatedByUserId = x.p.CreatedByUserId,
+                    CreatedDate = x.p.CreatedDate,
+                    ModifiedByUserId = x.p.ModifiedByUserId,
+                    ModifiedDate = x.p.ModifiedDate,
+                    CreatedByUserName = x.p.CreatedByUser != null ? (x.p.CreatedByUser.AccountName ?? string.Empty) : string.Empty,
+                    ModifiedByUserName = x.p.ModifiedByUser != null ? (x.p.ModifiedByUser.AccountName ?? string.Empty) : string.Empty,
+                    DeletedByUserName = x.dm.DeletedByUser != null ? (x.dm.DeletedByUser.AccountName ?? string.Empty) : string.Empty,
+                    DeletedDate = x.dm.DeletedDate ?? default,
+                    PaginationPageCount = paginationPageCount,
+                }).ToListAsync();
+        }
+
+        /// <summary>
+        /// Mirrors GetAllNamespacesPaged.sql: every distinct <see cref="PagesEntities.Page.Namespace"/> value
+        /// grouped with a count of pages in that namespace. Paginated by the "Pagination Size" customization
+        /// setting; <see cref="TwNamespaceStat.PaginationPageCount"/> is computed via the reference's own
+        /// ceiling-division formula against the total count of distinct namespaces (not the total page count).
+        /// Ordering mirrors <c>RepositoryHelpers.TransposeOrderby</c> against the script's <c>--CONFIG::</c>
+        /// mapping ("Name"/"Pages"): no <paramref name="orderBy"/> falls back to the script's own un-transposed
+        /// "ORDER BY P.[Namespace]" (always ascending, same quirk as <see cref="GetMissingPagesPaged"/>); an
+        /// unrecognized <paramref name="orderBy"/> throws, same pattern as
+        /// <see cref="GetPageRevisionsInfoByNavigationPaged"/>.
+        /// </summary>
+        public async Task<List<TwNamespaceStat>> GetAllNamespacesPaged(int pageNumber, string? orderBy = null, string? orderByDirection = null)
+        {
+            var paginationSize = await _configurationRepository.Get<int>(TwConfigGroup.Customization, "Pagination Size");
+
+            using var context = _createContext();
+
+            var grouped = context.Pages_Pages
+                .GroupBy(p => p.Namespace)
+                .Select(g => new { Namespace = g.Key, CountOfPages = g.Count() });
+
+            var distinctNamespaceCount = await context.Pages_Pages.Select(p => p.Namespace).Distinct().CountAsync();
+            var paginationPageCount = (distinctNamespaceCount + (paginationSize - 1)) / paginationSize;
+
+            bool ascending = string.Equals(orderByDirection, "asc", StringComparison.InvariantCultureIgnoreCase);
+
+            var ordered = string.IsNullOrEmpty(orderBy)
+                ? grouped.OrderBy(g => g.Namespace)
+                : orderBy.ToUpperInvariant() switch
+                {
+                    "NAME" => ascending ? grouped.OrderBy(g => g.Namespace) : grouped.OrderByDescending(g => g.Namespace),
+                    "PAGES" => ascending ? grouped.OrderBy(g => g.CountOfPages) : grouped.OrderByDescending(g => g.CountOfPages),
+                    _ => throw new InvalidOperationException(
+                        $"No order by mapping was found in 'GetAllNamespacesPaged.sql' for the field '{orderBy}'."),
+                };
+
+            return await ordered
+                .Skip((pageNumber - 1) * paginationSize)
+                .Take(paginationSize)
+                .Select(g => new TwNamespaceStat
+                {
+                    Namespace = g.Namespace,
+                    CountOfPages = g.CountOfPages,
+                    PaginationPageCount = paginationPageCount,
+                }).ToListAsync();
+        }
+
+        /// <summary>
+        /// Mirrors GetAllNamespaces.sql: every distinct <see cref="PagesEntities.Page.Namespace"/> value, no
+        /// ordering (matching the reference's plain "SELECT DISTINCT [Namespace] FROM [Page]").
+        /// </summary>
+        public async Task<List<string>> GetAllNamespaces()
+        {
+            using var context = _createContext();
+
+            return await context.Pages_Pages
+                .Select(p => p.Namespace)
+                .Distinct()
+                .ToListAsync();
+        }
+
+        /// <summary>
+        /// Mirrors GetAllPages.sql: every Pages.Page row inner-joined to the Pages.PageRevision row matching its
+        /// own current <see cref="PagesEntities.Page.Revision"/> (same join shape as
+        /// <see cref="GetTopRecentlyModifiedPagesInfo"/>/<see cref="GetLatestPageRevisionById"/>), including the
+        /// revision <see cref="PagesEntities.PageRevision.Body"/>. No ordering, matching the reference.
+        /// </summary>
+        public async Task<List<TwPage>> GetAllPages()
+        {
+            using var context = _createContext();
+
+            return await (from p in context.Pages_Pages
+                           join pr in context.Pages_PageRevisions on new { p.Id, p.Revision } equals new { Id = pr.PageId, pr.Revision }
+                           select new TwPage
+                           {
+                               Id = p.Id,
+                               Name = p.Name,
+                               Description = p.Description,
+                               Body = pr.Body,
+                               Revision = pr.Revision,
+                               Navigation = p.Navigation,
+                               CreatedByUserId = p.CreatedByUserId,
+                               CreatedDate = p.CreatedDate,
+                               ModifiedByUserId = p.ModifiedByUserId,
+                               ModifiedDate = p.ModifiedDate,
+                           }).ToListAsync();
+        }
+
+        /// <summary>
+        /// Mirrors GetAllTemplatePages.sql: the same join as <see cref="GetAllPages"/>, additionally filtered to
+        /// pages whose <see cref="PagesEntities.Page.Namespace"/> is exactly "Templates" - a literal, hardcoded
+        /// string in the reference script, preserved verbatim here.
+        /// </summary>
+        public async Task<List<TwPage>> GetAllTemplatePages()
+        {
+            using var context = _createContext();
+
+            return await (from p in context.Pages_Pages
+                           join pr in context.Pages_PageRevisions on new { p.Id, p.Revision } equals new { Id = pr.PageId, pr.Revision }
+                           where p.Namespace == "Templates"
+                           select new TwPage
+                           {
+                               Id = p.Id,
+                               Name = p.Name,
+                               Description = p.Description,
+                               Body = pr.Body,
+                               Revision = pr.Revision,
+                               Navigation = p.Navigation,
+                               CreatedByUserId = p.CreatedByUserId,
+                               CreatedDate = p.CreatedDate,
+                               ModifiedByUserId = p.ModifiedByUserId,
+                               ModifiedDate = p.ModifiedDate,
+                           }).ToListAsync();
+        }
+
+        /// <summary>
+        /// Mirrors GetAllFeatureTemplates.sql: every Pages.FeatureTemplate row, LEFT OUTER JOINed to its
+        /// associated help Pages.Page via the existing <see cref="PagesEntities.FeatureTemplate.Page"/> navigation
+        /// rather than a manual join, for <see cref="TwFeatureTemplate.HelpPageNavigation"/>. Cached under
+        /// <see cref="MemCache.Category.Configuration"/> with no extra key segments, same as the SQLite reference.
+        /// <see cref="TwFeatureTemplate.PageId"/> defaults to 0 when
+        /// <see cref="PagesEntities.FeatureTemplate.PageId"/> is null (the reference script selects the nullable
+        /// column directly into this non-nullable model property; this is the closest portable equivalent).
+        /// </summary>
+        public async Task<List<TwFeatureTemplate>> GetAllFeatureTemplates()
+        {
+            return (await MemCache.AddOrGetAsync(MemCacheKeyFunction.Build(MemCache.Category.Configuration), async () =>
+            {
+                using var context = _createContext();
+
+                return await context.FeatureTemplates
+                    .Select(ft => new TwFeatureTemplate
+                    {
+                        Name = ft.Name,
+                        Type = ft.Type,
+                        PageId = ft.PageId ?? 0,
+                        Description = ft.Description ?? string.Empty,
+                        TemplateText = ft.TemplateText ?? string.Empty,
+                        HelpPageNavigation = ft.Page != null ? ft.Page.Navigation : string.Empty,
+                    }).ToListAsync();
+            })).EnsureNotNull();
+        }
 
         public Task UpdatePageProcessingInstructions(int pageId, List<string> instructions)
             => throw new NotImplementedException();
