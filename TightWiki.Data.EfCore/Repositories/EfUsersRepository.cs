@@ -38,7 +38,19 @@ namespace TightWiki.Data.EfCore.Repositories
     /// and <see cref="GetAccountRoleMembershipPaged"/>) were implemented for real in phase 2b.10 - see each
     /// member's own doc comment for which SQLite script it mirrors, and <see cref="ResolveResourceNameAsync"/>'s
     /// remarks for the shared "compute a permission's effective resource name" logic reused across several of them.
-    /// The remaining 25 members land across phases 2b.11-2b.13 and still throw <see cref="NotImplementedException"/>.
+    /// A further 17 members (the user-profile category - <see cref="AutoCompleteAccount"/>, <see
+    /// cref="GetAllPublicProfilesPaged"/>, <see cref="AnonymizeProfile"/>, <see
+    /// cref="IsUserMemberOfAdministrators"/>, <see cref="GetAllUsers"/>, <see cref="GetAllUsersPaged"/>, <see
+    /// cref="CreateProfile"/>, <see cref="DoesEmailAddressExist"/>, <see cref="DoesProfileAccountExist"/>, <see
+    /// cref="GetBasicProfileByUserId"/>, <see cref="GetAccountProfileByUserId"/>, <see cref="SetProfileUserId"/>,
+    /// <see cref="GetUserAccountIdByNavigation"/>, <see cref="GetAccountProfileByNavigation"/>, <see
+    /// cref="UpdateProfile"/>, <see cref="UpdateProfileAvatar"/>, and <see cref="GetProfileAvatarByNavigation"/>)
+    /// were implemented for real in phase 2b.11 - see each member's own doc comment for which SQLite script it
+    /// mirrors, and <see cref="GetAllAccountUserRowsAsync"/>'s/<see cref="BuildFullAccountProfileAsync"/>'s
+    /// remarks for the shared cross-<see cref="ApplicationDbContext"/> logic reused across several of them. The
+    /// remaining 8 members (password-hash login lookups, the admin default-password state machine, and initial
+    /// admin-user bootstrapping) land across phases 2b.12-2b.13 and still throw <see
+    /// cref="NotImplementedException"/>.
     /// </para>
     /// <para>
     /// Takes a <see cref="Func{TightWikiDbContext}"/>/<see cref="Func{ApplicationDbContext}"/> pair rather than an
@@ -326,8 +338,52 @@ namespace TightWiki.Data.EfCore.Repositories
                 .ToListAsync();
         }
 
-        public Task<List<TwAccountProfile>> AutoCompleteAccount(string? searchText)
-            => throw new NotImplementedException();
+        /// <summary>
+        /// Mirrors AutoCompleteAccount.sql: Users.Profile rows with a matching AspNetUsers row (the reference's
+        /// own <c>INNER JOIN AspNetUsers</c> - a Profile with no matching Identity user is excluded entirely)
+        /// whose AccountName or Email contains <paramref name="searchText"/> (an empty string, matching
+        /// everything, if null - same as the reference's own <c>searchText ?? string.Empty</c>), ordered by
+        /// AccountName, capped at 25 rows. Only Email is pulled from the separate <see cref="ApplicationDbContext"/>
+        /// - unlike <see cref="GetAllAccountUserRowsAsync"/> (shared by <see cref="GetAllUsers"/>/<see
+        /// cref="GetAllUsersPaged"/>/<see cref="GetAllPublicProfilesPaged"/>), this deliberately skips fetching
+        /// claims, since this runs once per autocomplete keystroke and the reference script's own column list
+        /// (UserId/AccountName/EmailAddress) never needed them either. No caching, matching the SQLite reference.
+        /// Every other <see cref="TwAccountProfile"/> field is deliberately left unset here, same as the
+        /// reference script's own column list - the same "reference selects fewer columns than the target model
+        /// has properties for" idiom as <see cref="AutoCompleteRole"/>.
+        /// </summary>
+        public async Task<List<TwAccountProfile>> AutoCompleteAccount(string? searchText)
+        {
+            var text = searchText ?? string.Empty;
+
+            using var context = _createContext();
+            var profiles = await context.Profiles
+                .Select(p => new { p.UserId, AccountName = p.AccountName ?? string.Empty })
+                .ToListAsync();
+
+            using var identityContext = _createIdentityContext();
+            var identityUserIds = profiles.Select(p => p.UserId.ToString()).ToList();
+
+            var emailsByUserId = await identityContext.Users
+                .Where(u => identityUserIds.Contains(u.Id))
+                .Select(u => new { u.Id, u.Email })
+                .ToDictionaryAsync(u => u.Id, u => u.Email, StringComparer.OrdinalIgnoreCase);
+
+            return profiles
+                .Where(p => emailsByUserId.ContainsKey(p.UserId.ToString()))
+                .Select(p => new { p.UserId, p.AccountName, Email = emailsByUserId[p.UserId.ToString()] })
+                .Where(p => (p.Email?.Contains(text, StringComparison.OrdinalIgnoreCase) ?? false)
+                    || p.AccountName.Contains(text, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(p => p.AccountName, StringComparer.Ordinal)
+                .Take(25)
+                .Select(p => new TwAccountProfile
+                {
+                    UserId = p.UserId,
+                    AccountName = p.AccountName,
+                    EmailAddress = p.Email ?? string.Empty,
+                })
+                .ToList();
+        }
 
         /// <summary>
         /// Mirrors AddRoleMemberByName.sql: resolves <paramref name="roleName"/> to a Users.Role.Id, then delegates
@@ -899,14 +955,206 @@ namespace TightWiki.Data.EfCore.Repositories
                 .ToDictionaryAsync(p => p.Id, p => p.Name);
         }
 
-        public Task<List<TwAccountProfile>> GetAllPublicProfilesPaged(int pageNumber, int? pageSize = null, string? searchToken = null)
-            => throw new NotImplementedException();
+        /// <summary>
+        /// One row of the shared result set fetched by <see cref="GetAllAccountUserRowsAsync"/>.
+        /// </summary>
+        private sealed record AccountUserRow(
+            Guid UserId,
+            string AccountName,
+            string Navigation,
+            DateTime CreatedDate,
+            DateTime ModifiedDate,
+            string? Email,
+            bool EmailConfirmed,
+            string? FirstName,
+            string? LastName,
+            string? TimeZone,
+            string? Language,
+            string? Country);
 
-        public Task AnonymizeProfile(Guid userId)
-            => throw new NotImplementedException();
+        /// <summary>
+        /// Shared by <see cref="GetAllUsers"/>/<see cref="GetAllUsersPaged"/>/<see cref="GetAllPublicProfilesPaged"/>:
+        /// every Users.Profile row that has a matching AspNetUsers row (INNER JOIN semantics, mirroring all three
+        /// reference scripts' own <c>FROM Profile ... INNER JOIN AspNetUsers</c> - a Profile with no matching
+        /// Identity user is excluded entirely, not surfaced with blank identity fields), combined with
+        /// Email/EmailConfirmed and the "firstname"/"lastname"/"timezone"/"language"/"*/country" AspNetUserClaims
+        /// claims from the separate <see cref="ApplicationDbContext"/> - same two-context split and LEFT-OUTER-
+        /// JOIN-shaped claim lookups as <see cref="GetRoleMembersPaged"/> (see that member's remarks), just
+        /// unfiltered/unpaged/unsorted here - each of the three callers applies its own filter/sort/paging over
+        /// this shared result set in memory.
+        /// </summary>
+        private async Task<List<AccountUserRow>> GetAllAccountUserRowsAsync()
+        {
+            using var context = _createContext();
+            var profiles = await context.Profiles
+                .Select(p => new { p.UserId, p.AccountName, p.Navigation, p.CreatedDate, p.ModifiedDate })
+                .ToListAsync();
 
-        public Task<bool> IsUserMemberOfAdministrators(Guid userId)
-            => throw new NotImplementedException();
+            using var identityContext = _createIdentityContext();
+            var identityUserIds = profiles.Select(p => p.UserId.ToString()).ToList();
+
+            var identities = await identityContext.Users
+                .Where(u => identityUserIds.Contains(u.Id))
+                .Select(u => new { u.Id, u.Email, u.EmailConfirmed })
+                .ToDictionaryAsync(u => u.Id, StringComparer.OrdinalIgnoreCase);
+
+            var relevantClaimTypes = new[] { "firstname", "lastname", "timezone", "language" };
+            var claims = await identityContext.UserClaims
+                .Where(c => identityUserIds.Contains(c.UserId) && c.ClaimType != null
+                    && (relevantClaimTypes.Contains(c.ClaimType) || c.ClaimType.EndsWith("/country")))
+                .Select(c => new { c.UserId, c.ClaimType, c.ClaimValue })
+                .ToListAsync();
+
+            var claimsByUser = claims
+                .GroupBy(c => c.UserId, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
+
+            string? GetClaimValue(string identityUserId, Func<string, bool> claimTypeMatch)
+                => claimsByUser.TryGetValue(identityUserId, out var userClaims)
+                    ? userClaims.FirstOrDefault(c => c.ClaimType != null && claimTypeMatch(c.ClaimType))?.ClaimValue
+                    : null;
+
+            return profiles
+                .Where(p => identities.ContainsKey(p.UserId.ToString()))
+                .Select(p =>
+                {
+                    var identityUserId = p.UserId.ToString();
+                    var identity = identities[identityUserId];
+
+                    return new AccountUserRow(
+                        p.UserId,
+                        p.AccountName ?? string.Empty,
+                        p.Navigation ?? string.Empty,
+                        p.CreatedDate,
+                        p.ModifiedDate,
+                        identity.Email,
+                        identity.EmailConfirmed,
+                        GetClaimValue(identityUserId, t => t == "firstname"),
+                        GetClaimValue(identityUserId, t => t == "lastname"),
+                        GetClaimValue(identityUserId, t => t == "timezone"),
+                        GetClaimValue(identityUserId, t => t == "language"),
+                        GetClaimValue(identityUserId, t => t.EndsWith("/country", StringComparison.Ordinal)));
+                })
+                .ToList();
+        }
+
+        /// <summary>
+        /// Mirrors GetAllPublicProfilesPaged.sql: like <see cref="GetAllUsersPaged"/> but exposes only
+        /// non-personal fields (no EmailAddress/FirstName/LastName/EmailConfirmed in the projection, even though
+        /// Email is still used for <paramref name="searchToken"/> filtering, same as the reference script's own
+        /// comment "exactly like GetAllUsersPaged except it has no filter on personal information"). No
+        /// <paramref name="orderBy"/> parameter exists on this member (unlike <see cref="GetAllUsersPaged"/>) -
+        /// mirroring the reference script, which has no <c>--CUSTOM_ORDER_BEGIN::</c> section and always orders by
+        /// AccountName then UserId ascending.
+        /// </summary>
+        /// <remarks>
+        /// <b>Deliberate divergence from the reference's PaginationPageCount computation:</b>
+        /// GetAllPublicProfilesPaged.sql's inner <c>PaginationPageCount</c> subquery aliases its own <c>FROM</c>
+        /// clause as <c>Profile AS P</c>, but its <c>JOIN</c>/<c>WHERE</c> clauses only ever reference the
+        /// *outer* query's <c>U</c>/<c>ANU</c> aliases, never <c>P</c> - i.e. it is an accidentally correlated
+        /// subquery whose filter condition evaluates to the same constant (true or false) for every row of
+        /// <c>P</c>, for a given outer row. Since every row the outer query actually returns already satisfies
+        /// that same condition (it is copy-pasted from the outer <c>WHERE</c>), the subquery's <c>WHERE</c> is
+        /// always true when it runs, so it always counts the *entire, unfiltered* Profile table - <paramref
+        /// name="searchToken"/> has no effect whatsoever on the reported page count. Confirmed by contrast with
+        /// GetAllUsersPaged.sql's structurally near-identical subquery, which instead re-aliases its own local
+        /// <c>Profile AS U</c>/<c>AspNetUsers AS ANU</c> and so correctly computes the filtered count - this is a
+        /// copy-paste bug specific to GetAllPublicProfilesPaged.sql, not an intentional quirk. This computes the
+        /// actually-correct filtered count instead (same approach as every other paged member in this class),
+        /// rather than reproducing the reference's bug.
+        /// </remarks>
+        public async Task<List<TwAccountProfile>> GetAllPublicProfilesPaged(int pageNumber, int? pageSize = null, string? searchToken = null)
+        {
+            pageSize ??= await _configurationRepository.Get<int>(TwConfigGroup.Customization, "Pagination Size");
+            var effectivePageSize = pageSize.Value;
+
+            var rows = await GetAllAccountUserRowsAsync();
+
+            var filtered = string.IsNullOrEmpty(searchToken)
+                ? rows
+                : rows.Where(r =>
+                    r.AccountName.Contains(searchToken, StringComparison.OrdinalIgnoreCase) ||
+                    (r.Email?.Contains(searchToken, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                    (r.FirstName?.Contains(searchToken, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                    (r.LastName?.Contains(searchToken, StringComparison.OrdinalIgnoreCase) ?? false))
+                    .ToList();
+
+            var paginationPageCount = (filtered.Count + (effectivePageSize - 1)) / effectivePageSize;
+
+            return filtered
+                .OrderBy(r => r.AccountName, StringComparer.Ordinal)
+                .ThenBy(r => r.UserId)
+                .Skip((pageNumber - 1) * effectivePageSize)
+                .Take(effectivePageSize)
+                .Select(r => new TwAccountProfile
+                {
+                    UserId = r.UserId,
+                    AccountName = r.AccountName,
+                    Navigation = r.Navigation,
+                    TimeZone = r.TimeZone ?? string.Empty,
+                    Language = r.Language ?? string.Empty,
+                    Country = r.Country ?? string.Empty,
+                    CreatedDate = r.CreatedDate,
+                    ModifiedDate = r.ModifiedDate,
+                    PaginationPageSize = effectivePageSize,
+                    PaginationPageCount = paginationPageCount,
+                })
+                .ToList();
+        }
+
+        /// <summary>
+        /// Mirrors AnonymizeProfile.sql: overwrites Users.Profile AccountName/Navigation/Biography/ModifiedDate
+        /// for <paramref name="userId"/> with GDPR-style anonymized placeholder values and clears Avatar - a
+        /// no-op (not an error) if no such Profile row exists, same as the reference's own <c>UPDATE ... WHERE
+        /// UserId = @UserId</c> affecting zero rows. The anonymized name is generated by exactly the same C# logic
+        /// as the SQLite reference's own <c>UsersRepository.AnonymizeProfile</c> (this is plain C#, not SQL-side):
+        /// <c>"DeletedUser_"</c> followed by the current UTC timestamp's default <see cref="DateTime.ToString()"/>
+        /// rendering, run through <see cref="Utility.SanitizeAccountName"/> (treating spaces as invalid, in
+        /// addition to the usual filesystem-invalid characters) with every resulting underscore then stripped out
+        /// entirely (not just de-duplicated). AvatarContentType is deliberately left untouched, same as the
+        /// reference script's own column list (it clears Avatar but not AvatarContentType). Not reproduced: the
+        /// reference's own <c>UsersRepository.AnonymizeProfile</c> does not clear any <see
+        /// cref="MemCache.Category.User"/> cache entry for <paramref name="userId"/> afterward, unlike <see
+        /// cref="UpdateProfile"/>/<see cref="UpdateProfileAvatar"/> (both of which do) - kept as-is here to match
+        /// the reference's actual, if inconsistent, caching behavior rather than "fixing" an omission nobody asked
+        /// about.
+        /// </summary>
+        public async Task AnonymizeProfile(Guid userId)
+        {
+            var anonymousName = "DeletedUser_" + Utility.SanitizeAccountName($"{DateTime.UtcNow}", [' ']).Replace("_", "");
+
+            using var context = _createContext();
+
+            await context.Profiles
+                .Where(p => p.UserId == userId)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(p => p.AccountName, anonymousName)
+                    .SetProperty(p => p.Navigation, TwNavigation.Clean(anonymousName))
+                    .SetProperty(p => p.Biography, "Deleted account.")
+                    .SetProperty(p => p.Avatar, (byte[]?)null)
+                    .SetProperty(p => p.ModifiedDate, DateTime.UtcNow));
+        }
+
+        /// <summary>
+        /// Mirrors IsUserMemberOfAdministrators.sql: whether <paramref name="userId"/> has a Users.AccountRole
+        /// membership in the role named "Administrator" (<see cref="TwRoles.Administrator"/>). The reference's own
+        /// <c>INNER JOIN Profile</c> is a no-op under the consolidated schema's real FK constraints - same
+        /// reasoning as <see cref="GetApparentAccountPermissions"/>'s remarks on Users.AccountPermission/Profile
+        /// (AccountRoleConfiguration declares AccountRole.UserId as required with a real FK onto Profile.UserId,
+        /// so no AccountRole row can exist without a matching Profile row). Cached under <see
+        /// cref="MemCache.Category.User"/>, same cache key shape ([userId], no forceReCache parameter) as the
+        /// reference.
+        /// </summary>
+        public async Task<bool> IsUserMemberOfAdministrators(Guid userId)
+        {
+            var cacheKey = MemCacheKeyFunction.Build(MemCache.Category.User, [userId]);
+
+            return await MemCache.AddOrGetAsync(cacheKey, async () =>
+            {
+                using var context = _createContext();
+                return await context.AccountRoles.AnyAsync(ar => ar.UserId == userId && ar.Role.Name == TwRoles.Administrator.ToString());
+            });
+        }
 
         /// <summary>
         /// Mirrors GetRoleByName.sql: the single Users.Role row matching <paramref name="name"/> exactly (all four
@@ -1240,35 +1488,399 @@ namespace TightWiki.Data.EfCore.Repositories
                 .ToList();
         }
 
-        public Task<List<TwAccountProfile>> GetAllUsers()
-            => throw new NotImplementedException();
+        /// <summary>
+        /// Mirrors GetAllUsers.sql: every row from <see cref="GetAllAccountUserRowsAsync"/>, unfiltered/unsorted -
+        /// same shape as the reference script's own bare <c>SELECT ... FROM Profile INNER JOIN AspNetUsers ...</c>
+        /// with no <c>WHERE</c>/<c>ORDER BY</c>/<c>LIMIT</c> clause. Row order is therefore whatever <see
+        /// cref="GetAllAccountUserRowsAsync"/> happens to return, same as the reference (no ordering is requested
+        /// or guaranteed by either implementation) - the only caller, <c>DummyPageGenerator</c>, only ever picks a
+        /// random entry from the result, so this is not observable.
+        /// </summary>
+        public async Task<List<TwAccountProfile>> GetAllUsers()
+        {
+            var rows = await GetAllAccountUserRowsAsync();
 
-        public Task<List<TwAccountProfile>> GetAllUsersPaged(int pageNumber, string? orderBy = null, string? orderByDirection = null, string? searchToken = null)
-            => throw new NotImplementedException();
+            return rows.Select(r => new TwAccountProfile
+            {
+                UserId = r.UserId,
+                EmailAddress = r.Email ?? string.Empty,
+                AccountName = r.AccountName,
+                Navigation = r.Navigation,
+                FirstName = r.FirstName,
+                LastName = r.LastName,
+                TimeZone = r.TimeZone ?? string.Empty,
+                Language = r.Language ?? string.Empty,
+                Country = r.Country ?? string.Empty,
+                CreatedDate = r.CreatedDate,
+                ModifiedDate = r.ModifiedDate,
+                EmailConfirmed = r.EmailConfirmed,
+            }).ToList();
+        }
 
-        public Task CreateProfile(Guid userId, string accountName)
-            => throw new NotImplementedException();
+        /// <summary>
+        /// Mirrors GetAllUsersPaged.sql: every row from <see cref="GetAllAccountUserRowsAsync"/>, filtered by
+        /// <paramref name="searchToken"/> against AccountName/Email/FirstName/LastName (a null/empty token matches
+        /// everything, same as the reference's own <c>@SearchToken IS NULL OR ...</c>), then sorted/paged. Custom
+        /// ordering mirrors the script's own <c>--CONFIG::</c> mapping (Account/FirstName/LastName/Created/
+        /// TimeZone/Language/Country/EmailAddress); an unrecognized <paramref name="orderBy"/> throws, same as
+        /// <see cref="GetAllRoles"/>. Default ordering (no <paramref name="orderBy"/>) mirrors the script's own
+        /// un-transposed <c>ORDER BY U.AccountName</c> (ascending). <see cref="TwAccountProfile.PaginationPageSize"/>/
+        /// <see cref="TwAccountProfile.PaginationPageCount"/> are computed from the same filtered row count - the
+        /// reference script's own PaginationPageCount subquery re-aliases its own local <c>Profile AS U</c>/
+        /// <c>AspNetUsers AS ANU</c> and so is already correctly filtered by <paramref name="searchToken"/>
+        /// (contrast <see cref="GetAllPublicProfilesPaged"/>'s remarks, where the structurally similar subquery is
+        /// not correctly filtered due to a reference-side aliasing bug). String comparisons/sorts use <see
+        /// cref="StringComparer.Ordinal"/>/<see cref="StringComparison.OrdinalIgnoreCase"/>, same reasoning as
+        /// <see cref="GetRoleMembersPaged"/>.
+        /// </summary>
+        public async Task<List<TwAccountProfile>> GetAllUsersPaged(int pageNumber, string? orderBy = null, string? orderByDirection = null, string? searchToken = null)
+        {
+            var paginationSize = await _configurationRepository.Get<int>(TwConfigGroup.Customization, "Pagination Size");
 
-        public Task<bool> DoesEmailAddressExist(string? emailAddress)
-            => throw new NotImplementedException();
+            var rows = await GetAllAccountUserRowsAsync();
 
-        public Task<bool> DoesProfileAccountExist(string navigation)
-            => throw new NotImplementedException();
+            var filtered = string.IsNullOrEmpty(searchToken)
+                ? rows
+                : rows.Where(r =>
+                    r.AccountName.Contains(searchToken, StringComparison.OrdinalIgnoreCase) ||
+                    (r.Email?.Contains(searchToken, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                    (r.FirstName?.Contains(searchToken, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                    (r.LastName?.Contains(searchToken, StringComparison.OrdinalIgnoreCase) ?? false))
+                    .ToList();
 
-        public Task<TwAccountProfile?> GetBasicProfileByUserId(Guid userId)
-            => throw new NotImplementedException();
+            var paginationPageCount = (filtered.Count + (paginationSize - 1)) / paginationSize;
 
-        public Task<TwAccountProfile> GetAccountProfileByUserId(Guid userId, bool forceReCache = false)
-            => throw new NotImplementedException();
+            var profiles = filtered.Select(r => new TwAccountProfile
+            {
+                UserId = r.UserId,
+                EmailAddress = r.Email ?? string.Empty,
+                AccountName = r.AccountName,
+                Navigation = r.Navigation,
+                FirstName = r.FirstName,
+                LastName = r.LastName,
+                TimeZone = r.TimeZone ?? string.Empty,
+                Language = r.Language ?? string.Empty,
+                Country = r.Country ?? string.Empty,
+                CreatedDate = r.CreatedDate,
+                ModifiedDate = r.ModifiedDate,
+                EmailConfirmed = r.EmailConfirmed,
+                PaginationPageSize = paginationSize,
+                PaginationPageCount = paginationPageCount,
+            }).ToList();
 
-        public Task SetProfileUserId(string navigation, Guid userId)
-            => throw new NotImplementedException();
+            bool ascending = string.Equals(orderByDirection, "asc", StringComparison.InvariantCultureIgnoreCase);
 
-        public Task<Guid?> GetUserAccountIdByNavigation(string navigation)
-            => throw new NotImplementedException();
+            IOrderedEnumerable<TwAccountProfile> ordered = string.IsNullOrEmpty(orderBy)
+                ? profiles.OrderBy(x => x.AccountName, StringComparer.Ordinal)
+                : orderBy.ToUpperInvariant() switch
+                {
+                    "ACCOUNT" => ascending
+                        ? profiles.OrderBy(x => x.AccountName, StringComparer.Ordinal)
+                        : profiles.OrderByDescending(x => x.AccountName, StringComparer.Ordinal),
+                    "FIRSTNAME" => ascending
+                        ? profiles.OrderBy(x => x.FirstName, StringComparer.Ordinal)
+                        : profiles.OrderByDescending(x => x.FirstName, StringComparer.Ordinal),
+                    "LASTNAME" => ascending
+                        ? profiles.OrderBy(x => x.LastName, StringComparer.Ordinal)
+                        : profiles.OrderByDescending(x => x.LastName, StringComparer.Ordinal),
+                    "CREATED" => ascending
+                        ? profiles.OrderBy(x => x.CreatedDate)
+                        : profiles.OrderByDescending(x => x.CreatedDate),
+                    "TIMEZONE" => ascending
+                        ? profiles.OrderBy(x => x.TimeZone, StringComparer.Ordinal)
+                        : profiles.OrderByDescending(x => x.TimeZone, StringComparer.Ordinal),
+                    "LANGUAGE" => ascending
+                        ? profiles.OrderBy(x => x.Language, StringComparer.Ordinal)
+                        : profiles.OrderByDescending(x => x.Language, StringComparer.Ordinal),
+                    "COUNTRY" => ascending
+                        ? profiles.OrderBy(x => x.Country, StringComparer.Ordinal)
+                        : profiles.OrderByDescending(x => x.Country, StringComparer.Ordinal),
+                    "EMAILADDRESS" => ascending
+                        ? profiles.OrderBy(x => x.EmailAddress, StringComparer.Ordinal)
+                        : profiles.OrderByDescending(x => x.EmailAddress, StringComparer.Ordinal),
+                    _ => throw new InvalidOperationException($"No order by mapping was found in 'GetAllUsersPaged.sql' for the field '{orderBy}'."),
+                };
 
-        public Task<TwAccountProfile?> GetAccountProfileByNavigation(string? navigation)
-            => throw new NotImplementedException();
+            return ordered
+                .Skip((pageNumber - 1) * paginationSize)
+                .Take(paginationSize)
+                .ToList();
+        }
+
+        /// <summary>
+        /// Mirrors CreateProfile.sql: inserts a new Users.Profile row for <paramref name="userId"/>/<paramref
+        /// name="accountName"/> (Navigation computed via <see cref="TwNavigation.Clean"/>, CreatedDate/ModifiedDate
+        /// both set to <see cref="DateTime.UtcNow"/>) - same pre-check-then-insert shape as the reference's own
+        /// <c>UsersRepository.CreateProfile</c> C# wrapper, which throws if <see cref="DoesProfileAccountExist"/>
+        /// already returns true for the cleaned navigation, rather than letting the real unique index on
+        /// Navigation (<see cref="Configurations.Users.ProfileConfiguration"/>) throw a <see
+        /// cref="Microsoft.EntityFrameworkCore.DbUpdateException"/> instead.
+        /// </summary>
+        public async Task CreateProfile(Guid userId, string accountName)
+        {
+            var navigation = TwNavigation.Clean(accountName);
+
+            if (await DoesProfileAccountExist(navigation))
+            {
+                throw new Exception("An account with that name already exists");
+            }
+
+            using var context = _createContext();
+
+            context.Profiles.Add(new UsersEntities.Profile
+            {
+                UserId = userId,
+                AccountName = accountName,
+                Navigation = navigation,
+                CreatedDate = DateTime.UtcNow,
+                ModifiedDate = DateTime.UtcNow,
+            });
+
+            await context.SaveChangesAsync();
+        }
+
+        /// <summary>
+        /// Mirrors DoesEmailAddressExist.sql: whether an AspNetUsers row with the exact (lower-invariant-compared)
+        /// <paramref name="emailAddress"/> exists. Unlike <see cref="DoesRoleExist"/>/<see
+        /// cref="DoesProfileAccountExist"/>, this does replicate the reference's own client-side
+        /// <c>emailAddress?.ToLowerInvariant()</c> lowering before comparing - AspNetUsers.Email carries no
+        /// <c>COLLATE NOCASE</c> (or any other case-insensitive collation) anywhere in this schema, unlike
+        /// Users.Role.Name/Users.Profile.Navigation, so there is no DB-level collation to lean on here. A
+        /// <see langword="null"/> <paramref name="emailAddress"/> always returns <see langword="false"/>, matching
+        /// the reference SQL's own <c>Email = @EmailAddress</c> with a <see langword="null"/>-valued parameter
+        /// (standard SQL three-valued logic: "anything = NULL" is never true) - without this explicit guard, EF
+        /// Core's null-semantics compensation would instead translate <c>u.Email == email</c> (for a
+        /// <see langword="null"/> <c>email</c>) into <c>WHERE Email IS NULL</c>, which is true for any row with a
+        /// <see langword="null"/> Email (e.g. the seeded "admin" account), giving the opposite answer.
+        /// </summary>
+        public async Task<bool> DoesEmailAddressExist(string? emailAddress)
+        {
+            if (emailAddress == null)
+            {
+                return false;
+            }
+
+            var email = emailAddress.ToLowerInvariant();
+
+            using var identityContext = _createIdentityContext();
+            return await identityContext.Users.AnyAsync(u => u.Email == email);
+        }
+
+        /// <summary>
+        /// Mirrors DoesProfileAccountExist.sql: whether a Users.Profile row with the exact <paramref
+        /// name="navigation"/> exists. Case sensitivity is entirely determined by the DB-level collation on
+        /// <see cref="UsersEntities.Profile.Navigation"/> (<see cref="Configurations.Users.ProfileConfiguration"/>:
+        /// SQLite keeps <c>COLLATE NOCASE</c>; other providers fall back to the database's own default collation) -
+        /// same "no client-side StringComparer needed, this filter is translated to SQL" reasoning as <see
+        /// cref="DoesRoleExist"/>. Not reproduced: the reference's own client-side
+        /// <c>navigation?.ToLowerInvariant()</c> pre-lowering is redundant given <c>COLLATE NOCASE</c> already
+        /// makes the comparison case-insensitive, same conclusion already reached for <see cref="DoesRoleExist"/>.
+        /// </summary>
+        public async Task<bool> DoesProfileAccountExist(string navigation)
+        {
+            using var context = _createContext();
+            return await context.Profiles.AnyAsync(p => p.Navigation == navigation);
+        }
+
+        /// <summary>
+        /// Mirrors GetBasicProfileByUserId.sql: UserId/AccountName/Navigation/Biography plus the "theme"/
+        /// "language" AspNetUserClaims claims (from the separate <see cref="ApplicationDbContext"/>) for
+        /// <paramref name="userId"/> - or <see langword="null"/> if no Users.Profile row matches, or (mirroring
+        /// the reference's own <c>INNER JOIN AspNetUsers</c>) no matching Identity user exists either. Cached
+        /// under <see cref="MemCache.Category.User"/>, same cache key shape ([userId], no forceReCache parameter)
+        /// as the reference. Every other <see cref="TwAccountProfile"/> field is deliberately left unset here,
+        /// same as the reference script's own column list (it selects only UserId/AccountName/Navigation/
+        /// Biography/Theme/Language) - contrast the fuller column list on <see cref="GetAccountProfileByUserId"/>.
+        /// </summary>
+        public async Task<TwAccountProfile?> GetBasicProfileByUserId(Guid userId)
+        {
+            var cacheKey = MemCacheKeyFunction.Build(MemCache.Category.User, [userId]);
+
+            return await MemCache.AddOrGetAsync(cacheKey, async () =>
+            {
+                using var context = _createContext();
+                var profile = await context.Profiles.FirstOrDefaultAsync(p => p.UserId == userId);
+                if (profile == null)
+                {
+                    return null;
+                }
+
+                using var identityContext = _createIdentityContext();
+                var identityUserId = userId.ToString();
+                if (!await identityContext.Users.AnyAsync(u => u.Id == identityUserId))
+                {
+                    return null;
+                }
+
+                var theme = await identityContext.UserClaims
+                    .Where(c => c.UserId == identityUserId && c.ClaimType == "theme")
+                    .Select(c => c.ClaimValue)
+                    .FirstOrDefaultAsync();
+
+                var language = await identityContext.UserClaims
+                    .Where(c => c.UserId == identityUserId && c.ClaimType == "language")
+                    .Select(c => c.ClaimValue)
+                    .FirstOrDefaultAsync();
+
+                return new TwAccountProfile
+                {
+                    UserId = profile.UserId,
+                    AccountName = profile.AccountName ?? string.Empty,
+                    Navigation = profile.Navigation ?? string.Empty,
+                    Biography = profile.Biography,
+                    Theme = theme,
+                    Language = language ?? string.Empty,
+                };
+            });
+        }
+
+        /// <summary>
+        /// Shared by <see cref="GetAccountProfileByUserId"/>/<see cref="GetAccountProfileByNavigation"/>: builds
+        /// the full <see cref="TwAccountProfile"/> projection both reference scripts share (Avatar/EmailAddress/
+        /// AccountName/Navigation/Biography/FirstName/LastName/TimeZone/Language/Country/Theme/CreatedDate/
+        /// ModifiedDate/EmailConfirmed) for an already-fetched <paramref name="profile"/>, reading
+        /// Email/EmailConfirmed/claims from the separate <see cref="ApplicationDbContext"/> (same two-context
+        /// split as <see cref="GetRoleMembersPaged"/>). Returns <see langword="null"/> if no matching Identity
+        /// user exists, mirroring both reference scripts' own <c>INNER JOIN AspNetUsers</c>.
+        /// </summary>
+        private async Task<TwAccountProfile?> BuildFullAccountProfileAsync(UsersEntities.Profile profile)
+        {
+            using var identityContext = _createIdentityContext();
+            var identityUserId = profile.UserId.ToString();
+
+            var identity = await identityContext.Users
+                .Where(u => u.Id == identityUserId)
+                .Select(u => new { u.Email, u.EmailConfirmed })
+                .FirstOrDefaultAsync();
+
+            if (identity == null)
+            {
+                return null;
+            }
+
+            var claims = await identityContext.UserClaims
+                .Where(c => c.UserId == identityUserId)
+                .Select(c => new { c.ClaimType, c.ClaimValue })
+                .ToListAsync();
+
+            string? GetClaimValue(Func<string, bool> claimTypeMatch)
+                => claims.FirstOrDefault(c => c.ClaimType != null && claimTypeMatch(c.ClaimType))?.ClaimValue;
+
+            return new TwAccountProfile
+            {
+                UserId = profile.UserId,
+                Avatar = profile.Avatar,
+                EmailAddress = identity.Email ?? string.Empty,
+                AccountName = profile.AccountName ?? string.Empty,
+                Navigation = profile.Navigation ?? string.Empty,
+                Biography = profile.Biography,
+                FirstName = GetClaimValue(t => t == "firstname"),
+                LastName = GetClaimValue(t => t == "lastname"),
+                TimeZone = GetClaimValue(t => t == "timezone") ?? string.Empty,
+                Language = GetClaimValue(t => t == "language") ?? string.Empty,
+                Country = GetClaimValue(t => t.EndsWith("/country", StringComparison.Ordinal)) ?? string.Empty,
+                Theme = GetClaimValue(t => t == "theme"),
+                CreatedDate = profile.CreatedDate,
+                ModifiedDate = profile.ModifiedDate,
+                EmailConfirmed = identity.EmailConfirmed,
+            };
+        }
+
+        /// <summary>
+        /// Mirrors GetAccountProfileByUserId.sql: the full <see cref="BuildFullAccountProfileAsync"/> projection
+        /// for the Users.Profile row matching <paramref name="userId"/> exactly. Uses
+        /// <see cref="Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.SingleAsync{TSource}(IQueryable{TSource})"/>
+        /// for the Profile lookup, matching the reference's <c>QuerySingleAsync&lt;TwAccountProfile&gt;</c>
+        /// (Dapper's "exactly one row or throw") - throws if no profile matches. Cached under <see
+        /// cref="MemCache.Category.User"/>, same cache key shape ([userId]) as the reference; <paramref
+        /// name="forceReCache"/> bypasses the cache exactly like every other <c>forceReCache</c> parameter in this
+        /// class.
+        /// </summary>
+        public async Task<TwAccountProfile> GetAccountProfileByUserId(Guid userId, bool forceReCache = false)
+        {
+            var cacheKey = MemCacheKeyFunction.Build(MemCache.Category.User, [userId]);
+
+            return (await MemCache.AddOrGetAsync(cacheKey, forceReCache, async () =>
+            {
+                using var context = _createContext();
+                var profile = await context.Profiles.SingleAsync(p => p.UserId == userId);
+                return await BuildFullAccountProfileAsync(profile);
+            })).EnsureNotNull();
+        }
+
+        /// <summary>
+        /// Mirrors SetProfileUserId.sql via EF Core's LINQ bulk <c>ExecuteUpdateAsync</c> - updates the primary
+        /// key column (Users.Profile.UserId) of the row matching <paramref name="navigation"/> directly in SQL,
+        /// bypassing EF's change tracker entirely (which would otherwise require detaching/re-attaching the
+        /// entity to change its own primary key) - same idiom as <see cref="RemoveRoleMember"/>'s bulk
+        /// <c>ExecuteDeleteAsync</c>, just an update instead of a delete.
+        /// </summary>
+        public async Task SetProfileUserId(string navigation, Guid userId)
+        {
+            using var context = _createContext();
+            await context.Profiles
+                .Where(p => p.Navigation == navigation)
+                .ExecuteUpdateAsync(s => s.SetProperty(p => p.UserId, userId));
+        }
+
+        /// <summary>
+        /// Mirrors GetUserAccountIdByNavigation.sql: the UserId of the Users.Profile row matching <paramref
+        /// name="navigation"/>. Not reproduced faithfully at the type level, but reproduced exactly at the value
+        /// level: the reference's own <c>UsersFactory.QueryFirstOrDefaultAsync&lt;Guid&gt;(...)</c> queries for a
+        /// non-nullable <see cref="Guid"/> despite this member's <see cref="Guid"/>? return type and its own XML
+        /// doc comment ("or null if not found") - Dapper's <c>QueryFirstOrDefaultAsync&lt;Guid&gt;</c> returns
+        /// <see cref="Guid.Empty"/>, not <see langword="null"/>, when zero rows match a value-type projection, so
+        /// that is what the reference actually returns for an unknown navigation (confirmed by
+        /// <c>SelfDocument.cs</c>'s own <c>GetUserAccountIdByNavigation("admin").EnsureNotNull()</c> call site,
+        /// which only compiles/works against this exact behavior - a non-null but empty Guid value passes
+        /// <c>EnsureNotNull()</c> unchanged rather than throwing). This reproduces that same "empty Guid, not
+        /// null" result for an unknown navigation, via the same "non-nullable projection, implicit conversion to
+        /// the nullable return type" shape.
+        /// </summary>
+        public async Task<Guid?> GetUserAccountIdByNavigation(string navigation)
+        {
+            using var context = _createContext();
+
+            var userId = await context.Profiles
+                .Where(p => p.Navigation == navigation)
+                .Select(p => p.UserId)
+                .FirstOrDefaultAsync();
+
+            return userId;
+        }
+
+        /// <summary>
+        /// Mirrors GetAccountProfileByNavigation.sql: the full <see cref="BuildFullAccountProfileAsync"/>
+        /// projection for the Users.Profile row matching <paramref name="navigation"/>, or <see langword="null"/>
+        /// if no such profile exists (or, mirroring the reference's own <c>INNER JOIN AspNetUsers</c>, no
+        /// matching Identity user does). Uses
+        /// <see cref="Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.SingleOrDefaultAsync{TSource}(IQueryable{TSource})"/>
+        /// for the Profile lookup, matching the reference's <c>QuerySingleOrDefaultAsync&lt;TwAccountProfile&gt;</c>
+        /// - not cached, matching the reference. A <see langword="null"/> <paramref name="navigation"/> always
+        /// returns <see langword="null"/>, matching the reference SQL's own <c>Navigation = @Navigation</c> with a
+        /// <see langword="null"/>-valued parameter (never matches, standard SQL three-valued logic) - see the same
+        /// reasoning on <see cref="DoesEmailAddressExist"/> for why this guard is needed despite <see
+        /// cref="Configurations.Users.ProfileConfiguration"/>'s <c>COLLATE NOCASE</c> on Navigation not otherwise
+        /// mattering here. In practice this is theoretical: <see cref="UsersEntities.Profile.Navigation"/> is
+        /// always populated via <see cref="TwNavigation.Clean(string?)"/> in <see cref="CreateProfile"/>/<see
+        /// cref="UpdateProfile"/>, so a <see langword="null"/> Navigation row should never exist.
+        /// </summary>
+        public async Task<TwAccountProfile?> GetAccountProfileByNavigation(string? navigation)
+        {
+            if (navigation == null)
+            {
+                return null;
+            }
+
+            using var context = _createContext();
+            var profile = await context.Profiles.SingleOrDefaultAsync(p => p.Navigation == navigation);
+            if (profile == null)
+            {
+                return null;
+            }
+
+            return await BuildFullAccountProfileAsync(profile);
+        }
 
         public Task<TwAccountProfile?> GetProfileByAccountNameOrEmailAndPasswordHash(string accountNameOrEmail, string passwordHash)
             => throw new NotImplementedException();
@@ -1276,14 +1888,71 @@ namespace TightWiki.Data.EfCore.Repositories
         public Task<TwAccountProfile?> GetProfileByAccountNameOrEmailAndPassword(string accountNameOrEmail, string password)
             => throw new NotImplementedException();
 
-        public Task<TwProfileAvatar?> GetProfileAvatarByNavigation(string navigation)
-            => throw new NotImplementedException();
+        /// <summary>
+        /// Mirrors GetProfileAvatarByNavigation.sql: the Avatar bytes and AvatarContentType of the Users.Profile
+        /// row matching <paramref name="navigation"/>, or <see langword="null"/> if no such profile exists. Uses
+        /// <see cref="Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.SingleOrDefaultAsync{TSource}(IQueryable{TSource})"/>,
+        /// matching the reference's <c>QuerySingleOrDefaultAsync&lt;TwProfileAvatar&gt;</c> - unlike <see
+        /// cref="GetAccountProfileByNavigation"/>, no Identity lookup is needed here (Avatar/AvatarContentType
+        /// both live entirely on Users.Profile), so there is no cross-<see cref="ApplicationDbContext"/> join at
+        /// all.
+        /// </summary>
+        public async Task<TwProfileAvatar?> GetProfileAvatarByNavigation(string navigation)
+        {
+            using var context = _createContext();
 
-        public Task UpdateProfile(TwAccountProfile item)
-            => throw new NotImplementedException();
+            return await context.Profiles
+                .Where(p => p.Navigation == navigation)
+                .Select(p => new TwProfileAvatar
+                {
+                    Bytes = p.Avatar,
+                    ContentType = p.AvatarContentType ?? string.Empty,
+                })
+                .SingleOrDefaultAsync();
+        }
 
-        public Task UpdateProfileAvatar(Guid userId, byte[] imageData, string contentType)
-            => throw new NotImplementedException();
+        /// <summary>
+        /// Mirrors UpdateProfile.sql via EF Core's LINQ bulk <c>ExecuteUpdateAsync</c>: updates
+        /// AccountName/Navigation/Biography for the Users.Profile row matching <paramref name="item"/>'s UserId -
+        /// same idiom as <see cref="SetProfileUserId"/>. Not reproduced: <paramref name="item"/>'s ModifiedDate is
+        /// <b>not</b> written - matches the reference script's own column list, which never includes
+        /// <c>ModifiedDate</c> in its <c>SET</c> clause despite the reference's own C# wrapper still passing a
+        /// <c>ModifiedDate</c> parameter down to it (a dead parameter in the reference, not "fixed" here - this
+        /// simply never binds a ModifiedDate parameter at all, same end result). Clears <see
+        /// cref="MemCache.Category.User"/> for <paramref name="item"/>'s UserId afterward, same as the reference.
+        /// </summary>
+        public async Task UpdateProfile(TwAccountProfile item)
+        {
+            using var context = _createContext();
+
+            await context.Profiles
+                .Where(p => p.UserId == item.UserId)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(p => p.AccountName, item.AccountName)
+                    .SetProperty(p => p.Navigation, item.Navigation)
+                    .SetProperty(p => p.Biography, item.Biography));
+
+            MemCache.ClearCategory(MemCacheKey.Build(MemCache.Category.User, [item.UserId]));
+        }
+
+        /// <summary>
+        /// Mirrors UpdateProfileAvatar.sql via EF Core's LINQ bulk <c>ExecuteUpdateAsync</c>: updates
+        /// Avatar/AvatarContentType for the Users.Profile row matching <paramref name="userId"/> - same idiom as
+        /// <see cref="UpdateProfile"/>. Clears <see cref="MemCache.Category.User"/> for <paramref name="userId"/>
+        /// afterward, same as the reference.
+        /// </summary>
+        public async Task UpdateProfileAvatar(Guid userId, byte[] imageData, string contentType)
+        {
+            using var context = _createContext();
+
+            await context.Profiles
+                .Where(p => p.UserId == userId)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(p => p.Avatar, imageData)
+                    .SetProperty(p => p.AvatarContentType, contentType));
+
+            MemCache.ClearCategory(MemCacheKey.Build(MemCache.Category.User, [userId]));
+        }
 
         public Task<TwAdminPasswordChangeState> AdminPasswordStatus()
             => throw new NotImplementedException();
