@@ -35,10 +35,11 @@ namespace TightWiki.Data.EfCore.SqlServer
     /// provider-agnostic LINQ living in the shared <c>TightWiki.Data.EfCore</c> project rather than here, see each
     /// class's doc comment - are real. <see cref="PageRepository"/> (<see cref="EfPageRepository"/>) and
     /// <see cref="UsersRepository"/> (<see cref="EfUsersRepository"/>) followed the same move in phase 2b.1, still
-    /// as <see cref="NotImplementedException"/> stubs (only the wiring moved in 2b.1); 11 of
-    /// <see cref="PageRepository"/>'s 86 members were implemented for real in phase 2b.2 (see
-    /// <see cref="EfPageRepository"/>'s own doc comment for which), the rest - and all of
-    /// <see cref="UsersRepository"/> - land across phases 2b.3-2b.13.
+    /// as <see cref="NotImplementedException"/> stubs (only the wiring moved in 2b.1); all 86 of
+    /// <see cref="PageRepository"/>'s members were implemented for real across phases 2b.2-2b.8 (see
+    /// <see cref="EfPageRepository"/>'s own doc comment for which). 12 of <see cref="UsersRepository"/>'s 51
+    /// members (the role CRUD/membership category) were implemented for real in phase 2b.9 (see
+    /// <see cref="EfUsersRepository"/>'s own doc comment for which) - the rest land across phases 2b.10-2b.13.
     /// </remarks>
     public class SqlServerDatabaseManager : ITwDatabaseManager, ISpannedRepository
     {
@@ -98,7 +99,7 @@ namespace TightWiki.Data.EfCore.SqlServer
             EmojiRepository = new EfEmojiRepository(CreateDbContext, ConfigurationRepository);
             PageRepository = new EfPageRepository(CreateDbContext, ConfigurationRepository);
             StatisticsRepository = new EfStatisticsRepository(CreateDbContext, ConfigurationRepository);
-            UsersRepository = new EfUsersRepository(CreateDbContext, CreateApplicationDbContext);
+            UsersRepository = new EfUsersRepository(CreateDbContext, CreateApplicationDbContext, ConfigurationRepository);
         }
 
         /// <summary>
