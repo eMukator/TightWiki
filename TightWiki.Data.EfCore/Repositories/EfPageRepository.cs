@@ -2,21 +2,38 @@ using TightWiki.Plugin;
 using TightWiki.Plugin.Interfaces;
 using TightWiki.Plugin.Interfaces.Repository;
 using TightWiki.Plugin.Models;
+using PagesEntities = TightWiki.Data.EfCore.Entities.Pages;
 
-namespace TightWiki.Data.EfCore.SqlServer.Repositories
+namespace TightWiki.Data.EfCore.Repositories
 {
     /// <summary>
-    /// MSSQL/EF Core implementation of <see cref="ITwPageRepository"/>.
+    /// Provider-agnostic (SQL Server/Postgres, per Database-Providers-Plan.md chapter 3) LINQ-over-EF-Core
+    /// implementation of <see cref="ITwPageRepository"/>. Lives in the shared <c>TightWiki.Data.EfCore</c>
+    /// project rather than a per-provider driver project, for the same reason as <see cref="EfConfigurationRepository"/>/
+    /// <see cref="EfLoggingRepository"/>/<see cref="EfEmojiRepository"/>/<see cref="EfStatisticsRepository"/> (see
+    /// those classes' doc comments): plain LINQ against <see cref="TightWikiDbContext"/> needs no provider-specific
+    /// code here at all. Originally landed as a <c>SqlServerPageRepository</c> stub under
+    /// <c>TightWiki.Data.EfCore.SqlServer/Repositories/</c> in phase 2a.1; moved here (still a stub) in phase 2b.1.
     /// </summary>
     /// <remarks>
-    /// Skeleton only (Database-Providers-Plan.md phase 2a.1) - every member throws
-    /// <see cref="NotImplementedException"/> for now. Real LINQ-based implementations (89 methods, including the
-    /// <c>TempSearchTerms</c> replacement discussed in chapter 4.4) land in phase 2b. See
-    /// <see cref="SqlServerConfigurationRepository"/> for why this is a concrete class rather than typing
-    /// <see cref="SqlServerDatabaseManager.PageRepository"/> directly as <see cref="ITwPageRepository"/>.
+    /// Skeleton only (Database-Providers-Plan.md phase 2b.1 - pure architectural wiring, no business logic) - every
+    /// member throws <see cref="NotImplementedException"/> for now. Real LINQ-based implementations (86 methods,
+    /// including the <c>TempSearchTerms</c> replacement discussed in chapter 4.4) land across phases 2b.2-2b.13.
+    /// Takes a <see cref="Func{TightWikiDbContext}"/> rather than an injected context instance, mirroring
+    /// <see cref="EfConfigurationRepository"/>/<see cref="EfLoggingRepository"/>/<see cref="EfEmojiRepository"/>/
+    /// <see cref="EfStatisticsRepository"/> (see <see cref="EfConfigurationRepository"/>'s doc comment) -
+    /// <see cref="SqlServer.SqlServerDatabaseManager"/> passes its own <c>CreateDbContext</c> method group in as
+    /// that delegate.
     /// </remarks>
-    public class SqlServerPageRepository : ITwPageRepository
+    public sealed class EfPageRepository : ITwPageRepository
     {
+        private readonly Func<TightWikiDbContext> _createContext;
+
+        public EfPageRepository(Func<TightWikiDbContext> createContext)
+        {
+            _createContext = createContext;
+        }
+
         public Task<List<TwPage>> AutoCompletePage(string? searchText)
             => throw new NotImplementedException();
 

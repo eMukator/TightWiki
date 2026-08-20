@@ -1,23 +1,51 @@
 using Microsoft.AspNetCore.Identity;
 using System.Security.Claims;
+using TightWiki.Library;
 using TightWiki.Plugin;
 using TightWiki.Plugin.Interfaces.Repository;
 using TightWiki.Plugin.Models;
+using UsersEntities = TightWiki.Data.EfCore.Entities.Users;
 
-namespace TightWiki.Data.EfCore.SqlServer.Repositories
+namespace TightWiki.Data.EfCore.Repositories
 {
     /// <summary>
-    /// MSSQL/EF Core implementation of <see cref="ITwUsersRepository"/>.
+    /// Provider-agnostic (SQL Server/Postgres, per Database-Providers-Plan.md chapter 3) LINQ-over-EF-Core
+    /// implementation of <see cref="ITwUsersRepository"/>. Lives in the shared <c>TightWiki.Data.EfCore</c>
+    /// project rather than a per-provider driver project, for the same reason as <see cref="EfConfigurationRepository"/>/
+    /// <see cref="EfLoggingRepository"/>/<see cref="EfEmojiRepository"/>/<see cref="EfStatisticsRepository"/>/
+    /// <see cref="EfPageRepository"/> (see those classes' doc comments): plain LINQ against
+    /// <see cref="TightWikiDbContext"/> needs no provider-specific code here at all. Originally landed as a
+    /// <c>SqlServerUsersRepository</c> stub under <c>TightWiki.Data.EfCore.SqlServer/Repositories/</c> in
+    /// phase 2a.1; moved here (still a stub) in phase 2b.1.
     /// </summary>
     /// <remarks>
-    /// Skeleton only (Database-Providers-Plan.md phase 2a.1) - every member throws
-    /// <see cref="NotImplementedException"/> for now. Real LINQ-based implementations (51 methods) land in
-    /// phase 2b, alongside the Identity/schema-Users work (chapter 4.1.1). See
-    /// <see cref="SqlServerConfigurationRepository"/> for why this is a concrete class rather than typing
-    /// <see cref="SqlServerDatabaseManager.UsersRepository"/> directly as <see cref="ITwUsersRepository"/>.
+    /// <para>
+    /// Skeleton only (Database-Providers-Plan.md phase 2b.1 - pure architectural wiring, no business logic) - every
+    /// member throws <see cref="NotImplementedException"/> for now. Real LINQ-based implementations (51 methods)
+    /// land across phases 2b.2-2b.13.
+    /// </para>
+    /// <para>
+    /// Takes a <see cref="Func{TightWikiDbContext}"/>/<see cref="Func{ApplicationDbContext}"/> pair rather than an
+    /// injected context instance, mirroring <see cref="EfConfigurationRepository"/> (see that class's doc comment)
+    /// - <see cref="SqlServer.SqlServerDatabaseManager"/> passes its own <c>CreateDbContext</c>/
+    /// <c>CreateApplicationDbContext</c> method groups in as those two delegates. The second delegate is not used
+    /// by any member yet - it exists now so this class's constructor signature never needs to change once
+    /// <see cref="ValidateEncryptionAndCreateAdminUser"/>/<see cref="UpsertUserClaims"/> (which need
+    /// <see cref="ApplicationDbContext"/>/<see cref="UserManager{TUser}"/> for ASP.NET Core Identity) are
+    /// implemented for real in phase 2b.13.
+    /// </para>
     /// </remarks>
-    public class SqlServerUsersRepository : ITwUsersRepository
+    public sealed class EfUsersRepository : ITwUsersRepository
     {
+        private readonly Func<TightWikiDbContext> _createContext;
+        private readonly Func<ApplicationDbContext> _createIdentityContext;
+
+        public EfUsersRepository(Func<TightWikiDbContext> createContext, Func<ApplicationDbContext> createIdentityContext)
+        {
+            _createContext = createContext;
+            _createIdentityContext = createIdentityContext;
+        }
+
         public Task<bool> IsAccountAMemberOfRole(Guid userId, int roleId, bool forceReCache = false)
             => throw new NotImplementedException();
 

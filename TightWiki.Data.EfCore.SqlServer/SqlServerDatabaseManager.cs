@@ -6,7 +6,6 @@ using Microsoft.Extensions.Logging;
 using System.Data.Common;
 using TightWiki.Data.EfCore.Repositories;
 using TightWiki.Data.EfCore.Seeding;
-using TightWiki.Data.EfCore.SqlServer.Repositories;
 using TightWiki.Library;
 using TightWiki.Plugin;
 using TightWiki.Plugin.Interfaces;
@@ -34,9 +33,10 @@ namespace TightWiki.Data.EfCore.SqlServer
     /// <see cref="EfLoggingRepository"/>), <see cref="EmojiRepository"/> (phase 2a.8 - <see cref="EfEmojiRepository"/>)
     /// and <see cref="StatisticsRepository"/> (phase 2a.9 - <see cref="EfStatisticsRepository"/>) - all
     /// provider-agnostic LINQ living in the shared <c>TightWiki.Data.EfCore</c> project rather than here, see each
-    /// class's doc comment - are real. The remaining two business repositories (<see cref="PageRepository"/>,
-    /// <see cref="UsersRepository"/>) are still stubs that throw <see cref="NotImplementedException"/> until
-    /// phase 2b lands.
+    /// class's doc comment - are real. <see cref="PageRepository"/> (<see cref="EfPageRepository"/>) and
+    /// <see cref="UsersRepository"/> (<see cref="EfUsersRepository"/>) followed the same move in phase 2b.1, but
+    /// remain <see cref="NotImplementedException"/> stubs there - only the wiring moved in 2b.1; real LINQ-based
+    /// implementations land across phases 2b.2-2b.13.
     /// </remarks>
     public class SqlServerDatabaseManager : ITwDatabaseManager, ISpannedRepository
     {
@@ -61,13 +61,13 @@ namespace TightWiki.Data.EfCore.SqlServer
         public EfLoggingRepository LoggingRepository { get; private set; }
         ITwLoggingRepository ITwDatabaseManager.LoggingRepository => LoggingRepository;
 
-        public SqlServerPageRepository PageRepository { get; private set; }
+        public EfPageRepository PageRepository { get; private set; }
         ITwPageRepository ITwDatabaseManager.PageRepository => PageRepository;
 
         public EfStatisticsRepository StatisticsRepository { get; private set; }
         ITwStatisticsRepository ITwDatabaseManager.StatisticsRepository => StatisticsRepository;
 
-        public SqlServerUsersRepository UsersRepository { get; private set; }
+        public EfUsersRepository UsersRepository { get; private set; }
         ITwUsersRepository ITwDatabaseManager.UsersRepository => UsersRepository;
 
         /// <summary>
@@ -94,9 +94,9 @@ namespace TightWiki.Data.EfCore.SqlServer
             Logger = new TightWiki.Library.DatabaseLogger(LoggingRepository, minimumLogLevel);
 
             EmojiRepository = new EfEmojiRepository(CreateDbContext, ConfigurationRepository);
-            PageRepository = new SqlServerPageRepository();
+            PageRepository = new EfPageRepository(CreateDbContext);
             StatisticsRepository = new EfStatisticsRepository(CreateDbContext, ConfigurationRepository);
-            UsersRepository = new SqlServerUsersRepository();
+            UsersRepository = new EfUsersRepository(CreateDbContext, CreateApplicationDbContext);
         }
 
         /// <summary>
