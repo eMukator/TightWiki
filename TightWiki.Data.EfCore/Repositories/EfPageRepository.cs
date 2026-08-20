@@ -1,3 +1,4 @@
+using DuoVia.FuzzyStrings;
 using Microsoft.EntityFrameworkCore;
 using NTDLS.Helpers;
 using TightWiki.Library.Caching;
@@ -21,7 +22,7 @@ namespace TightWiki.Data.EfCore.Repositories
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Still a partial skeleton (Database-Providers-Plan.md phase 2b.1-2b.4) - 46 of 86 members still throw
+    /// Still a partial skeleton (Database-Providers-Plan.md phase 2b.1-2b.5) - 31 of 86 members still throw
     /// <see cref="NotImplementedException"/>. The first 11 (autocomplete, page-cache flushing, page comments,
     /// current-page-editors) were implemented for real in phase 2b.2; a further 19 page/revision metadata-read
     /// members (<see cref="GetPageRevisionInfoById"/>, <see cref="GetPageNavigationByPageId"/>,
@@ -39,10 +40,19 @@ namespace TightWiki.Data.EfCore.Repositories
     /// <see cref="GetAllNamespacesPaged"/>, <see cref="GetAllNamespaces"/>, <see cref="GetAllPages"/>,
     /// <see cref="GetAllTemplatePages"/>, and <see cref="GetAllFeatureTemplates"/> - see
     /// <see cref="GetAllPagesPaged"/>'s remarks for the <c>TempPageIds</c>/<c>list.Contains(...)</c> temp-table
-    /// replacement pattern introduced here and reused in later phases) landed in phase 2b.4. Real LINQ-based
-    /// implementations of the rest (including the <c>TempTokens</c>/<c>TempTags</c>/<c>TempNamespaces</c>/
-    /// <c>TempReferences</c>/<c>TempInstructions</c> replacements discussed in chapter 4.4) land across phases
-    /// 2b.5-2b.13.
+    /// replacement pattern introduced here and reused in later phases) landed in phase 2b.4. A further 15
+    /// search/tags/tokens members - the most complex category in the interface -
+    /// (<see cref="PageSearch"/>, <see cref="PageSearchPaged"/>, <see cref="GetSimilarPagesPaged"/>,
+    /// <see cref="GetRelatedPagesPaged"/>, <see cref="GetBacklinkPagesPaged"/>, <see cref="GetDeletedPageIdsByTokens"/>,
+    /// <see cref="GetPageIdsByTokens"/>, <see cref="GetSearchTokensByPageId"/>, <see cref="SavePageSearchTokens"/>,
+    /// <see cref="ParsePageTokens"/>, <see cref="GetAssociatedTags"/>, <see cref="GetPageInfoByNamespaces"/>,
+    /// <see cref="GetPageInfoByTags"/>, <see cref="GetPageInfoByTag"/>, and <see cref="UpdatePageTags"/> - see
+    /// <see cref="GetFuzzyPageSearchTokens"/>'s remarks for the <c>TempSearchTerms</c>/fuzzy-fan-out substitution
+    /// and <see cref="ComputeParsedPageTokens"/> for the DuoVia.FuzzyStrings Double Metaphone scoring, which - like
+    /// the SQLite reference - runs entirely in C#, not SQL) landed in phase 2b.5. Real LINQ-based implementations
+    /// of the rest (including the <c>TempTags</c>/<c>TempNamespaces</c>/<c>TempReferences</c>/<c>TempInstructions</c>
+    /// replacements discussed in chapter 4.4 that this phase's own tag/namespace methods didn't already cover)
+    /// land across phases 2b.6-2b.13.
     /// </para>
     /// <para>
     /// Takes a <see cref="Func{TightWikiDbContext}"/> rather than an injected context instance, mirroring
@@ -410,20 +420,452 @@ namespace TightWiki.Data.EfCore.Repositories
                 .ToListAsync();
         }
 
-        public Task<List<TwPage>> PageSearch(List<string> searchTerms)
-            => throw new NotImplementedException();
+        /// <summary>
+        /// Mirrors GetFuzzyPageSearchTokens.sql: candidate Pages.PageToken rows whose
+        /// <see cref="PagesEntities.PageToken.DoubleMetaphone"/> matches one of <paramref name="tokens"/>'s
+        /// (deduplicated - <see cref="TwPageToken.Equals"/> compares <see cref="TwPageToken.Token"/>
+        /// case-insensitively) Double Metaphone codes, fetched via <c>Contains(...)</c> (the same
+        /// <c>CreateTempTableFrom</c>/temp-table replacement pattern as <see cref="GetAllPagesPaged"/>'s remarks -
+        /// here against <see cref="PagesEntities.PageToken.DoubleMetaphone"/> rather than an id list), then joined
+        /// against <paramref name="tokens"/> and aggregated client-side rather than in the database.
+        /// </summary>
+        /// <remarks>
+        /// The reference script's own join predicate is <c>ST.Token != T.Token AND ST.DoubleMetaphone =
+        /// T.DoubleMetaphone</c> - a single Pages.PageToken row can join to <i>multiple</i> distinct search terms
+        /// that share its phonetic code but differ in literal spelling, and each such pairing contributes its own
+        /// row to the SQL aggregate (so <c>SUM(T.Weight)</c> can add the same token's weight more than once, while
+        /// <c>COUNT(DISTINCT T.DoubleMetaphone)</c> still counts each phonetic code only once for the match
+        /// ratio). This fan-out is a genuine multi-way join against a client-side list (not just a membership
+        /// test), which has no safe, guaranteed-translatable EF Core/SQL Server LINQ equivalent - unlike the
+        /// simple <c>list.Contains(...)</c> substitution used everywhere else (Database-Providers-Plan.md chapter
+        /// 4.4/8). So this method fetches only the DoubleMetaphone-filtered candidate rows from the database (a
+        /// translatable, bounded <c>Contains</c> query) and reproduces the fan-out join and aggregation itself in
+        /// memory, replicating the SQL script's arithmetic (including the weight double-counting) exactly.
+        /// </remarks>
+        private async Task<List<TwPageSearchToken>> GetFuzzyPageSearchTokens(List<TwPageToken> tokens, double minimumMatchScore)
+        {
+            var searchTerms = tokens.Distinct().ToList();
+            var searchTermDoubleMetaphones = searchTerms.Select(t => t.DoubleMetaphone).Distinct().ToList();
+            var tokenCount = tokens.Count;
 
-        public Task<List<TwPage>> PageSearchPaged(List<string> searchTerms, int pageNumber, int? pageSize = null, bool? allowFuzzyMatching = null)
-            => throw new NotImplementedException();
+            using var context = _createContext();
 
-        public Task<List<TwRelatedPage>> GetSimilarPagesPaged(int pageId, int similarity, int pageNumber, int? pageSize = null)
-            => throw new NotImplementedException();
+            var candidates = await context.Pages_PageTokens
+                .Where(t => searchTermDoubleMetaphones.Contains(t.DoubleMetaphone))
+                .Select(t => new { t.PageId, t.Token, t.DoubleMetaphone, t.Weight })
+                .ToListAsync();
 
-        public Task<List<TwRelatedPage>> GetRelatedPagesPaged(int pageId, int pageNumber, int? pageSize = null)
-            => throw new NotImplementedException();
+            var joinedRows =
+                from pt in candidates
+                from st in searchTerms
+                where !string.Equals(st.Token, pt.Token, StringComparison.OrdinalIgnoreCase)
+                      && string.Equals(st.DoubleMetaphone, pt.DoubleMetaphone, StringComparison.OrdinalIgnoreCase)
+                select pt;
 
-        public Task<List<TwRelatedPage>> GetBacklinkPagesPaged(int pageId, int pageNumber, int? pageSize = null)
-            => throw new NotImplementedException();
+            return joinedRows
+                .GroupBy(pt => pt.PageId)
+                .Select(g => new TwPageSearchToken
+                {
+                    PageId = g.Key,
+                    Match = g.Select(pt => pt.DoubleMetaphone).Distinct(StringComparer.OrdinalIgnoreCase).Count() / (tokenCount + 0.0),
+                    Weight = g.Sum(pt => pt.Weight) * 1.0,
+                    //No weight benefit on score for fuzzy matching, matching GetFuzzyPageSearchTokens.sql.
+                    Score = g.Select(pt => pt.DoubleMetaphone).Distinct(StringComparer.OrdinalIgnoreCase).Count() / (tokenCount + 0.0),
+                })
+                .Where(t => t.Score >= minimumMatchScore)
+                .OrderByDescending(t => t.Score)
+                .Take(250)
+                .ToList();
+        }
+
+        /// <summary>
+        /// Mirrors GetExactPageSearchTokens.sql: Pages.PageToken rows whose <see cref="PagesEntities.PageToken.Token"/>
+        /// exactly matches one of <paramref name="tokens"/>'s (deduplicated) token strings, fetched via
+        /// <c>Contains(...)</c> (the <c>TempSearchTerms</c> replacement, same pattern as
+        /// <see cref="GetFuzzyPageSearchTokens"/>), grouped by page and scored server-side - unlike the fuzzy
+        /// variant, an exact match join has no fan-out (Pages.PageToken's composite primary key is
+        /// (PageId, Token), so at most one row per page can match a given token string), so the aggregation
+        /// translates safely to a single grouped SQL query.
+        /// </summary>
+        private async Task<List<TwPageSearchToken>> GetExactPageSearchTokens(List<TwPageToken> tokens, double minimumMatchScore)
+        {
+            var searchTermTokens = tokens.Distinct().Select(t => t.Token).ToList();
+            var tokenCount = tokens.Count;
+
+            using var context = _createContext();
+
+            return await context.Pages_PageTokens
+                .Where(t => searchTermTokens.Contains(t.Token))
+                .GroupBy(t => t.PageId)
+                .Select(g => new TwPageSearchToken
+                {
+                    PageId = g.Key,
+                    Match = g.Count() / (tokenCount + 0.0),
+                    Weight = g.Sum(x => x.Weight) * 1.5,
+                    //Extra weight on score for exact matches, matching GetExactPageSearchTokens.sql.
+                    Score = (g.Sum(x => x.Weight) * 1.5) * (g.Count() / (tokenCount + 0.0)),
+                })
+                .Where(t => t.Score >= minimumMatchScore)
+                .OrderByDescending(t => t.Score)
+                .Take(250)
+                .ToListAsync();
+        }
+
+        /// <summary>
+        /// Mirrors <c>PageRepository.GetMeteredPageSearchTokens</c>: combines <see cref="GetExactPageSearchTokens"/>
+        /// (always) with <see cref="GetFuzzyPageSearchTokens"/> (only when <paramref name="allowFuzzyMatching"/>),
+        /// each run against half the "Minimum Match Score" search setting, then - when both ran - merges the two
+        /// result sets by page (taking the max Match/Weight/Score per page, same as the reference's
+        /// <c>GroupBy(...).Select(...Max...)</c>) and keeps only pages whose combined score still clears the full
+        /// threshold. Cached under <see cref="MemCache.Category.Search"/>, same cache key shape (joined search
+        /// terms + fuzzy flag) as the SQLite reference.
+        /// </summary>
+        private async Task<List<TwPageSearchToken>> GetMeteredPageSearchTokens(List<string> searchTerms, bool allowFuzzyMatching)
+        {
+            var cacheKey = MemCacheKeyFunction.Build(MemCache.Category.Search, [string.Join(',', searchTerms), allowFuzzyMatching]);
+
+            return (await MemCache.AddOrGetAsync(cacheKey, async () =>
+            {
+                var minimumMatchScore = await _configurationRepository.Get<float>(TwConfigGroup.Search, "Minimum Match Score");
+
+                var searchTokens = searchTerms.Select(o => new TwPageToken
+                {
+                    Token = o,
+                    DoubleMetaphone = o.ToDoubleMetaphone(),
+                }).ToList();
+
+                if (allowFuzzyMatching)
+                {
+                    var allTokens = await GetExactPageSearchTokens(searchTokens, minimumMatchScore / 2.0);
+                    var fuzzyTokens = await GetFuzzyPageSearchTokens(searchTokens, minimumMatchScore / 2.0);
+
+                    allTokens.AddRange(fuzzyTokens);
+
+                    return allTokens
+                        .GroupBy(token => token.PageId)
+                        .Where(group => group.Sum(g => g.Score) >= minimumMatchScore)
+                        .Select(group => new TwPageSearchToken
+                        {
+                            PageId = group.Key,
+                            Match = group.Max(g => g.Match),
+                            Weight = group.Max(g => g.Weight),
+                            Score = group.Max(g => g.Score),
+                        }).ToList();
+                }
+                else
+                {
+                    return await GetExactPageSearchTokens(searchTokens, minimumMatchScore / 2.0);
+                }
+            })).EnsureNotNull();
+        }
+
+        /// <summary>
+        /// Mirrors PageSearch.sql: every page matched by <see cref="GetMeteredPageSearchTokens"/> (the
+        /// <c>TempSearchTerms</c> join replaced by fetching the matched pages via <c>Contains(...)</c> against
+        /// their page IDs, then attaching each page's Match/Weight/Score client-side - the same substitution
+        /// pattern as <see cref="GetAllPagesPaged"/>'s remarks), ordered by Score descending then Name then Id
+        /// ascending, same as the reference. Returns an empty list immediately when <paramref name="searchTerms"/>
+        /// is empty or no page clears the minimum match score, same short-circuits as the SQLite reference.
+        /// </summary>
+        public async Task<List<TwPage>> PageSearch(List<string> searchTerms)
+        {
+            if (searchTerms.Count == 0)
+            {
+                return new List<TwPage>();
+            }
+
+            bool allowFuzzyMatching = await _configurationRepository.Get<bool>(TwConfigGroup.Search, "Allow Fuzzy Matching");
+            var meteredSearchTokens = await GetMeteredPageSearchTokens(searchTerms, allowFuzzyMatching);
+            if (meteredSearchTokens.Count == 0)
+            {
+                return new List<TwPage>();
+            }
+
+            var scoreByPageId = meteredSearchTokens.ToDictionary(t => t.PageId);
+            var pageIds = scoreByPageId.Keys.ToList();
+
+            using var context = _createContext();
+
+            var pages = await context.Pages_Pages
+                .Where(p => pageIds.Contains(p.Id))
+                .Select(p => new TwPage
+                {
+                    Id = p.Id,
+                    Name = p.Name,
+                    Navigation = p.Navigation,
+                    Description = p.Description,
+                    Revision = p.Revision,
+                    CreatedByUserId = p.CreatedByUserId,
+                    CreatedDate = p.CreatedDate,
+                    ModifiedByUserId = p.ModifiedByUserId,
+                    ModifiedDate = p.ModifiedDate,
+                    CreatedByUserName = p.CreatedByUser != null ? (p.CreatedByUser.AccountName ?? string.Empty) : string.Empty,
+                    ModifiedByUserName = p.ModifiedByUser != null ? (p.ModifiedByUser.AccountName ?? string.Empty) : string.Empty,
+                })
+                .ToListAsync();
+
+            foreach (var page in pages)
+            {
+                var token = scoreByPageId[page.Id];
+                page.Match = (decimal)token.Match;
+                page.Weight = (decimal)token.Weight;
+                page.Score = (decimal)token.Score;
+            }
+
+            return pages
+                .OrderByDescending(p => p.Score)
+                .ThenBy(p => p.Name)
+                .ThenBy(p => p.Id)
+                .ToList();
+        }
+
+        /// <summary>
+        /// Mirrors PageSearchPaged.sql: the same match as <see cref="PageSearch"/>, but with Score rescaled to a
+        /// percentage of the maximum score among matched pages (the reference's <c>(ST.Score / @MaximumScore) *
+        /// 100.0</c>), paginated by <paramref name="pageSize"/> (defaulting to the "Pagination Size" customization
+        /// setting) with <see cref="TwPage.PaginationPageCount"/> computed via the reference's own
+        /// ceiling-division formula against the total (unpaginated) matched-page count. <paramref name="allowFuzzyMatching"/>
+        /// defaults to the "Allow Fuzzy Matching" search setting, same as the reference.
+        /// </summary>
+        public async Task<List<TwPage>> PageSearchPaged(List<string> searchTerms, int pageNumber, int? pageSize = null, bool? allowFuzzyMatching = null)
+        {
+            if (searchTerms.Count == 0)
+            {
+                return new List<TwPage>();
+            }
+
+            pageSize ??= await _configurationRepository.Get<int>(TwConfigGroup.Customization, "Pagination Size");
+            allowFuzzyMatching ??= await _configurationRepository.Get<bool>(TwConfigGroup.Search, "Allow Fuzzy Matching");
+
+            var meteredSearchTokens = await GetMeteredPageSearchTokens(searchTerms, allowFuzzyMatching == true);
+            if (meteredSearchTokens.Count == 0)
+            {
+                return new List<TwPage>();
+            }
+
+            var maximumScore = meteredSearchTokens.Max(t => t.Score);
+            var scoreByPageId = meteredSearchTokens.ToDictionary(t => t.PageId);
+            var pageIds = scoreByPageId.Keys.ToList();
+
+            using var context = _createContext();
+
+            var pages = await context.Pages_Pages
+                .Where(p => pageIds.Contains(p.Id))
+                .Select(p => new TwPage
+                {
+                    Id = p.Id,
+                    Name = p.Name,
+                    Navigation = p.Navigation,
+                    Description = p.Description,
+                    Revision = p.Revision,
+                    CreatedByUserId = p.CreatedByUserId,
+                    CreatedDate = p.CreatedDate,
+                    ModifiedByUserId = p.ModifiedByUserId,
+                    ModifiedDate = p.ModifiedDate,
+                    CreatedByUserName = p.CreatedByUser != null ? (p.CreatedByUser.AccountName ?? string.Empty) : string.Empty,
+                    ModifiedByUserName = p.ModifiedByUser != null ? (p.ModifiedByUser.AccountName ?? string.Empty) : string.Empty,
+                })
+                .ToListAsync();
+
+            var paginationPageCount = (pages.Count + (pageSize.Value - 1)) / pageSize.Value;
+
+            foreach (var page in pages)
+            {
+                var token = scoreByPageId[page.Id];
+                page.Match = (decimal)token.Match;
+                page.Weight = (decimal)token.Weight;
+                page.Score = (decimal)((token.Score / maximumScore) * 100.0);
+                page.PaginationPageCount = paginationPageCount;
+            }
+
+            return pages
+                .OrderByDescending(p => p.Score)
+                .ThenBy(p => p.Name)
+                .ThenBy(p => p.Id)
+                .Skip((pageNumber - 1) * pageSize.Value)
+                .Take(pageSize.Value)
+                .ToList();
+        }
+
+        /// <summary>
+        /// Mirrors GetSimilarPagesPaged.sql: pages sharing at least <paramref name="similarity"/> percent of
+        /// <paramref name="pageId"/>'s own tags (percentage = shared tag count / <paramref name="pageId"/>'s
+        /// total tag count * 100), including <paramref name="pageId"/> itself (always 100% similar to its own
+        /// tags) - a literal quirk of the reference script (no <c>P.Id &lt;&gt; @PageId</c> filter anywhere in
+        /// it), preserved rather than "fixed" here. The reference's self-join against <c>PageTag</c> (via a
+        /// <c>TempTags</c>-less <c>LEFT OUTER JOIN</c>) is replaced by a two-step query (candidate page IDs via
+        /// <c>Contains(...)</c>, matching the shared <c>list.Contains(...)</c> temp-table substitution pattern)
+        /// rather than a single join, since EF Core has no portable equivalent of the reference's own
+        /// self-referencing join combined with a <c>HAVING</c> percentage threshold against a correlated-subquery
+        /// denominator. No explicit <c>ORDER BY</c> exists in the reference script itself (rows come back in
+        /// whatever order SQLite happens to produce for the <c>IN (...)</c> filter, typically primary-key/rowid
+        /// order) - ordered here by <see cref="PagesEntities.Page.Id"/> ascending as the closest deterministic
+        /// equivalent. Paginated by <paramref name="pageSize"/> (defaulting to the "Pagination Size" customization
+        /// setting); <see cref="TwRelatedPage.PaginationPageCount"/> is computed via the reference's own
+        /// ceiling-division formula against the total (unpaginated) matched-page count.
+        /// </summary>
+        public async Task<List<TwRelatedPage>> GetSimilarPagesPaged(int pageId, int similarity, int pageNumber, int? pageSize = null)
+        {
+            pageSize ??= await _configurationRepository.Get<int>(TwConfigGroup.Customization, "Pagination Size");
+
+            using var context = _createContext();
+
+            var rootTags = await context.Pages_PageTags
+                .Where(t => t.PageId == pageId)
+                .Select(t => t.Tag)
+                .ToListAsync();
+
+            List<int> matchingPageIds;
+            if (rootTags.Count == 0)
+            {
+                matchingPageIds = new List<int>();
+            }
+            else
+            {
+                var totalRootTagCount = rootTags.Count;
+
+                matchingPageIds = await context.Pages_PageTags
+                    .Where(t => rootTags.Contains(t.Tag))
+                    .GroupBy(t => t.PageId)
+                    .Where(g => (g.Count() / (double)totalRootTagCount) * 100.0 >= similarity)
+                    .Select(g => g.Key)
+                    .ToListAsync();
+            }
+
+            var query = context.Pages_Pages.Where(p => matchingPageIds.Contains(p.Id));
+
+            var totalCount = await query.CountAsync();
+            var paginationPageCount = (totalCount + (pageSize.Value - 1)) / pageSize.Value;
+
+            return await query
+                .OrderBy(p => p.Id)
+                .Skip((pageNumber - 1) * pageSize.Value)
+                .Take(pageSize.Value)
+                .Select(p => new TwRelatedPage
+                {
+                    Id = p.Id,
+                    Name = p.Name,
+                    Navigation = p.Navigation,
+                    Description = p.Description,
+                    PaginationPageSize = pageSize.Value,
+                    PaginationPageCount = paginationPageCount,
+                }).ToListAsync();
+        }
+
+        /// <summary>
+        /// Mirrors GetRelatedPagesPaged.sql: every page that references (links to) <paramref name="pageId"/> -
+        /// despite the method's name, this is the same "who links here" relationship as
+        /// <see cref="GetBacklinkPagesPaged"/>'s own first branch, just without the outlink/second-order-link
+        /// branches - excluding self-references, ordered by <see cref="PagesEntities.Page.Name"/> ascending.
+        /// Paginated by <paramref name="pageSize"/> (defaulting to the "Pagination Size" customization setting);
+        /// <see cref="TwRelatedPage.PaginationPageCount"/> is computed via the reference's own ceiling-division
+        /// formula against the total (unpaginated) matched-page count.
+        /// </summary>
+        public async Task<List<TwRelatedPage>> GetRelatedPagesPaged(int pageId, int pageNumber, int? pageSize = null)
+        {
+            pageSize ??= await _configurationRepository.Get<int>(TwConfigGroup.Customization, "Pagination Size");
+
+            using var context = _createContext();
+
+            var query = from pr in context.PageReferences
+                        join p in context.Pages_Pages on pr.PageId equals p.Id
+                        where pr.ReferencesPageId == pageId && pr.PageId != pr.ReferencesPageId
+                        select p;
+
+            var totalCount = await query.CountAsync();
+            var paginationPageCount = (totalCount + (pageSize.Value - 1)) / pageSize.Value;
+
+            return await query
+                .OrderBy(p => p.Name)
+                .Skip((pageNumber - 1) * pageSize.Value)
+                .Take(pageSize.Value)
+                .Select(p => new TwRelatedPage
+                {
+                    Id = p.Id,
+                    Name = p.Name,
+                    Navigation = p.Navigation,
+                    Description = p.Description,
+                    PaginationPageSize = pageSize.Value,
+                    PaginationPageCount = paginationPageCount,
+                }).ToListAsync();
+        }
+
+        /// <summary>
+        /// Mirrors GetBacklinkPagesPaged.sql: the union of three page sets related to <paramref name="pageId"/>
+        /// via Pages.PageReference - pages that reference it (backlinks), pages it references (outlinks), and
+        /// pages that reference the same targets it references (second-order links) - each excluding
+        /// <paramref name="pageId"/> itself, deduplicated (the reference script's <c>UNION</c>, not <c>UNION
+        /// ALL</c>), ordered by <see cref="PagesEntities.Page.Name"/> ascending. The reference script's single
+        /// three-way <c>UNION</c> query (plus a <c>COUNT(*) OVER()</c> window function for pagination) has no safe
+        /// single-query EF Core/SQL Server LINQ translation, so each branch is resolved to a page-ID list via its
+        /// own translatable query (the same <c>Contains(...)</c> temp-table substitution pattern as
+        /// <see cref="GetAllPagesPaged"/>'s remarks) and the three lists are combined and deduplicated client-side
+        /// before the final paginated page query. Paginated by <paramref name="pageSize"/> (defaulting to the
+        /// "Pagination Size" customization setting); <see cref="TwRelatedPage.PaginationPageCount"/> is computed
+        /// via the reference's own ceiling-division formula (functionally equivalent to its window-function
+        /// count) against the total (unpaginated) combined-page count.
+        /// </summary>
+        public async Task<List<TwRelatedPage>> GetBacklinkPagesPaged(int pageId, int pageNumber, int? pageSize = null)
+        {
+            pageSize ??= await _configurationRepository.Get<int>(TwConfigGroup.Customization, "Pagination Size");
+
+            using var context = _createContext();
+
+            //Backlinks: pages that reference pageId.
+            var backlinkIds = await context.PageReferences
+                .Where(pr => pr.ReferencesPageId == pageId && pr.PageId != pageId)
+                .Select(pr => pr.PageId)
+                .ToListAsync();
+
+            //Outlinks: pages referenced by pageId.
+            var outlinkIds = await context.PageReferences
+                .Where(pr => pr.PageId == pageId && pr.ReferencesPageId != null && pr.ReferencesPageId != pageId)
+                .Select(pr => pr.ReferencesPageId!.Value)
+                .ToListAsync();
+
+            //Second order links: pages that reference the same targets pageId references.
+            var outgoingTargetIds = await context.PageReferences
+                .Where(pr => pr.PageId == pageId && pr.ReferencesPageId != null)
+                .Select(pr => pr.ReferencesPageId!.Value)
+                .Distinct()
+                .ToListAsync();
+
+            List<int> secondOrderIds;
+            if (outgoingTargetIds.Count == 0)
+            {
+                secondOrderIds = new List<int>();
+            }
+            else
+            {
+                secondOrderIds = await context.PageReferences
+                    .Where(pr => pr.ReferencesPageId != null
+                        && outgoingTargetIds.Contains(pr.ReferencesPageId!.Value)
+                        && pr.PageId != pageId)
+                    .Select(pr => pr.PageId)
+                    .ToListAsync();
+            }
+
+            var combinedIds = backlinkIds.Concat(outlinkIds).Concat(secondOrderIds).Distinct().ToList();
+
+            var query = context.Pages_Pages.Where(p => combinedIds.Contains(p.Id));
+
+            var totalCount = await query.CountAsync();
+            var paginationPageCount = (totalCount + (pageSize.Value - 1)) / pageSize.Value;
+
+            return await query
+                .OrderBy(p => p.Name)
+                .Skip((pageNumber - 1) * pageSize.Value)
+                .Take(pageSize.Value)
+                .Select(p => new TwRelatedPage
+                {
+                    Id = p.Id,
+                    Name = p.Name,
+                    Navigation = p.Navigation,
+                    Description = p.Description,
+                    PaginationPageSize = pageSize.Value,
+                    PaginationPageCount = paginationPageCount,
+                }).ToListAsync();
+        }
 
         /// <summary>
         /// Mirrors <c>PageRepository.FlushPageCache</c>: clears every <see cref="MemCache.Category.Page"/> cache
@@ -675,11 +1117,75 @@ namespace TightWiki.Data.EfCore.Repositories
                 }).ToListAsync();
         }
 
-        public Task<List<int>> GetDeletedPageIdsByTokens(List<string>? tokens)
-            => throw new NotImplementedException();
+        /// <summary>
+        /// Mirrors GetDeletedPageIdsByTokens.sql: the IDs of every soft-deleted page whose DeletedPages.PageToken
+        /// rows cover every distinct non-empty token in <paramref name="tokens"/> - an AND-style "does this page
+        /// contain all of these tokens" match (unlike <see cref="PageSearch"/>'s score-based ranking). The
+        /// reference script's own arithmetic (<c>HAVING Count(0) = @TokenCount</c>, where <c>@TokenCount</c> is
+        /// <paramref name="tokens"/>'s raw, non-deduplicated length) is algebraically equivalent to "every element
+        /// of <paramref name="tokens"/> - counting duplicates - is a non-empty token the page actually has": if
+        /// <paramref name="tokens"/> contains any null/empty entry, no page can ever satisfy the count (the
+        /// script's own <c>WHERE Coalesce(TT.[value], '') &lt;&gt; ''</c> guarantees an empty entry can never join
+        /// to a matching Pages.PageToken row, so it can never contribute to the required total), so that case is
+        /// short-circuited to an empty result here rather than issuing a query that could never match anything.
+        /// Otherwise, this reduces to "the page has every distinct token" - resolved via <c>Contains(...)</c> (the
+        /// <c>TempTokens</c> replacement, same pattern as <see cref="GetAllPagesPaged"/>'s remarks) plus a grouped
+        /// count check that relies on DeletedPages.PageToken's composite primary key (PageId, Token) to guarantee
+        /// at most one matching row per page per distinct token.
+        /// </summary>
+        public async Task<List<int>> GetDeletedPageIdsByTokens(List<string>? tokens)
+        {
+            if (tokens == null || tokens.Count == 0)
+            {
+                return new List<int>();
+            }
 
-        public Task<List<int>> GetPageIdsByTokens(List<string>? tokens)
-            => throw new NotImplementedException();
+            if (tokens.Any(string.IsNullOrEmpty))
+            {
+                return new List<int>();
+            }
+
+            var distinctTokens = tokens.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+            using var context = _createContext();
+
+            return await context.DeletedPages_PageTokens
+                .Where(t => distinctTokens.Contains(t.Token))
+                .GroupBy(t => t.PageId)
+                .Where(g => g.Count() == distinctTokens.Count)
+                .Select(g => g.Key)
+                .ToListAsync();
+        }
+
+        /// <summary>
+        /// Mirrors GetPageIdsByTokens.sql: the same "page contains every distinct non-empty token" match as
+        /// <see cref="GetDeletedPageIdsByTokens"/>, against active Pages.PageToken rows instead of soft-deleted
+        /// DeletedPages.PageToken rows - see that method's remarks for the full explanation of the
+        /// <c>HAVING Count(0) = @TokenCount</c> equivalence and the empty-token short-circuit.
+        /// </summary>
+        public async Task<List<int>> GetPageIdsByTokens(List<string>? tokens)
+        {
+            if (tokens == null || tokens.Count == 0)
+            {
+                return new List<int>();
+            }
+
+            if (tokens.Any(string.IsNullOrEmpty))
+            {
+                return new List<int>();
+            }
+
+            var distinctTokens = tokens.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+            using var context = _createContext();
+
+            return await context.Pages_PageTokens
+                .Where(t => distinctTokens.Contains(t.Token))
+                .GroupBy(t => t.PageId)
+                .Where(g => g.Count() == distinctTokens.Count)
+                .Select(g => g.Key)
+                .ToListAsync();
+        }
 
         /// <summary>
         /// Mirrors GetAllNamespacePagesPaged.sql: every Pages.Page row whose <see cref="PagesEntities.Page.Namespace"/>
@@ -1117,11 +1623,63 @@ namespace TightWiki.Data.EfCore.Repositories
             });
         }
 
-        public Task<List<TwPageToken>> GetSearchTokensByPageId(int pageId)
-            => throw new NotImplementedException();
+        /// <summary>
+        /// Mirrors GetSearchTokensByPageId.sql: every Pages.PageToken row for <paramref name="pageId"/>.
+        /// </summary>
+        public async Task<List<TwPageToken>> GetSearchTokensByPageId(int pageId)
+        {
+            using var context = _createContext();
 
-        public Task SavePageSearchTokens(List<TwPageToken> items)
-            => throw new NotImplementedException();
+            return await context.Pages_PageTokens
+                .Where(t => t.PageId == pageId)
+                .Select(t => new TwPageToken
+                {
+                    PageId = t.PageId,
+                    Token = t.Token,
+                    DoubleMetaphone = t.DoubleMetaphone,
+                    Weight = t.Weight,
+                }).ToListAsync();
+        }
+
+        /// <summary>
+        /// Mirrors SavePageSearchTokens.sql: replaces the Pages.PageToken rows for every page represented in
+        /// <paramref name="items"/> (deduplicated - <see cref="TwPageToken.Equals"/> compares PageId and Token
+        /// case-insensitively, same as the reference's <c>items.Distinct()</c> before building <c>TempTokens</c>)
+        /// with exactly the given rows, wrapped in a single transaction (the reference script's own
+        /// <c>BEGIN TRANSACTION</c>/<c>COMMIT TRANSACTION</c>) - delete-then-insert per affected page, not a
+        /// diff/merge. An empty <paramref name="items"/> list is a no-op, matching the reference (an empty
+        /// <c>TempTokens</c> deletes nothing and inserts nothing).
+        /// </summary>
+        public async Task SavePageSearchTokens(List<TwPageToken> items)
+        {
+            var distinctItems = items.Distinct().ToList();
+
+            if (distinctItems.Count == 0)
+            {
+                return;
+            }
+
+            var pageIds = distinctItems.Select(i => i.PageId).Distinct().ToList();
+
+            using var context = _createContext();
+            using var transaction = await context.Database.BeginTransactionAsync();
+
+            await context.Pages_PageTokens
+                .Where(t => pageIds.Contains(t.PageId))
+                .ExecuteDeleteAsync();
+
+            context.Pages_PageTokens.AddRange(distinctItems.Select(i => new PagesEntities.PageToken
+            {
+                PageId = i.PageId,
+                Token = i.Token,
+                DoubleMetaphone = i.DoubleMetaphone,
+                Weight = i.Weight,
+            }));
+
+            await context.SaveChangesAsync();
+
+            await transaction.CommitAsync();
+        }
 
         public Task TruncateAllPageRevisions(string confirm)
             => throw new NotImplementedException();
@@ -1418,20 +1976,172 @@ namespace TightWiki.Data.EfCore.Repositories
             });
         }
 
-        public Task<List<TwTagAssociation>> GetAssociatedTags(string tag)
-            => throw new NotImplementedException();
+        /// <summary>
+        /// Mirrors GetAssociatedTags.sql: every distinct tag applied to any page that itself carries the tag
+        /// matching <paramref name="tag"/>'s navigation (a "tags that co-occur with this tag" query, used for
+        /// tag-cloud/related-tag browsing) - resolved in two steps (the pages carrying <paramref name="tag"/>,
+        /// then every Pages.PageTag row belonging to those pages) rather than the reference script's own
+        /// self-join, since the self-join's <c>Interm</c> alias is provably redundant (it only re-selects
+        /// <paramref name="tag"/>'s own Pages.PageTag row, already implied by <c>Root</c>). <see cref="TwTagAssociation.Tag"/>
+        /// is the alphabetically-last literal spelling among all pages sharing that tag's navigation (the
+        /// reference's own <c>MAX(Extent.Tag)</c>); <see cref="TwTagAssociation.PageCount"/> is the count of
+        /// distinct pages carrying it (the reference's own <c>COUNT(DISTINCT Extent.PageId)</c> - defensive
+        /// against a page somehow carrying the same tag Navigation twice, which the table's own composite primary
+        /// key (PageId, Tag) already prevents in practice for any single literal spelling, but not necessarily
+        /// across two different-cased spellings that both clean to the same Navigation). No ordering, capped at
+        /// 100 rows, matching the reference's own un-ordered <c>LIMIT 100</c>. Grouping/aggregation is done
+        /// client-side over the (page-count-bounded) candidate rows rather than via a database
+        /// <c>GROUP BY</c>/<c>COUNT(DISTINCT ...)</c>, to sidestep any provider-translation risk for a nested
+        /// distinct-count inside a grouped projection.
+        /// </summary>
+        public async Task<List<TwTagAssociation>> GetAssociatedTags(string tag)
+        {
+            using var context = _createContext();
 
-        public Task<List<TwPage>> GetPageInfoByNamespaces(List<string> namespaces)
-            => throw new NotImplementedException();
+            var matchingPageIds = await context.Pages_PageTags
+                .Where(t => t.Navigation == tag)
+                .Select(t => t.PageId)
+                .Distinct()
+                .ToListAsync();
 
-        public Task<List<TwPage>> GetPageInfoByTags(IEnumerable<string> tags)
-            => throw new NotImplementedException();
+            if (matchingPageIds.Count == 0)
+            {
+                return new List<TwTagAssociation>();
+            }
 
-        public Task<List<TwPage>> GetPageInfoByTag(string tag)
-            => throw new NotImplementedException();
+            var candidateTags = await context.Pages_PageTags
+                .Where(t => matchingPageIds.Contains(t.PageId))
+                .Select(t => new { t.PageId, t.Tag, t.Navigation })
+                .ToListAsync();
 
-        public Task UpdatePageTags(int pageId, List<string> tags)
-            => throw new NotImplementedException();
+            return candidateTags
+                .GroupBy(t => t.Navigation)
+                .Select(g => new TwTagAssociation
+                {
+                    Tag = g.Max(x => x.Tag)!,
+                    PageCount = g.Select(x => x.PageId).Distinct().Count(),
+                })
+                .Take(100)
+                .ToList();
+        }
+
+        /// <summary>
+        /// Mirrors GetPageInfoByNamespaces.sql: page metadata (excluding content) for every page whose
+        /// <see cref="PagesEntities.Page.Namespace"/> is one of <paramref name="namespaces"/>, resolved via
+        /// <c>Contains(...)</c> (the <c>TempNamespaces</c> replacement, same pattern as
+        /// <see cref="GetAllPagesPaged"/>'s remarks). The reference script's own <c>SELECT DISTINCT</c> is not
+        /// reproduced as an explicit <c>Distinct()</c> call - <see cref="PagesEntities.Page.Id"/> is already
+        /// unique, so a <c>Contains(...)</c> filter (unlike the reference's own join against a temp table that
+        /// could contain duplicate namespace values) can never itself produce duplicate page rows.
+        /// </summary>
+        public async Task<List<TwPage>> GetPageInfoByNamespaces(List<string> namespaces)
+        {
+            using var context = _createContext();
+
+            return await context.Pages_Pages
+                .Where(p => namespaces.Contains(p.Namespace))
+                .Select(p => new TwPage
+                {
+                    Id = p.Id,
+                    Name = p.Name,
+                    Description = p.Description,
+                    Navigation = p.Navigation,
+                    CreatedByUserId = p.CreatedByUserId,
+                    CreatedDate = p.CreatedDate,
+                    ModifiedByUserId = p.ModifiedByUserId,
+                    ModifiedDate = p.ModifiedDate,
+                }).ToListAsync();
+        }
+
+        /// <summary>
+        /// Mirrors GetPageInfoByTags.sql: page metadata (excluding content) for every page carrying at least one
+        /// tag whose <see cref="TwNavigation.Clean"/>-cleaned navigation matches one of <paramref name="tags"/>
+        /// (each cleaned the same way, matching the reference's own <c>cleanedTags = tags.Select(TwNavigation.Clean)</c>).
+        /// Resolved in two steps - matching page IDs via <c>Contains(...)</c> against
+        /// <see cref="PagesEntities.PageTag.Navigation"/> (the <c>TempTags</c> replacement, same pattern as
+        /// <see cref="GetAllPagesPaged"/>'s remarks), then the page rows themselves - rather than a single joined
+        /// query, so the reference script's own <c>SELECT DISTINCT</c> (needed there because a page with multiple
+        /// matching tags would otherwise join multiple times) has a natural equivalent: an intermediate
+        /// <c>Distinct()</c> on page IDs.
+        /// </summary>
+        public async Task<List<TwPage>> GetPageInfoByTags(IEnumerable<string> tags)
+        {
+            var cleanedTags = tags.Select(t => TwNavigation.Clean(t)).ToList();
+
+            using var context = _createContext();
+
+            var pageIds = await context.Pages_PageTags
+                .Where(t => cleanedTags.Contains(t.Navigation))
+                .Select(t => t.PageId)
+                .Distinct()
+                .ToListAsync();
+
+            return await context.Pages_Pages
+                .Where(p => pageIds.Contains(p.Id))
+                .Select(p => new TwPage
+                {
+                    Id = p.Id,
+                    Name = p.Name,
+                    Description = p.Description,
+                    Navigation = p.Navigation,
+                    CreatedByUserId = p.CreatedByUserId,
+                    CreatedDate = p.CreatedDate,
+                    ModifiedByUserId = p.ModifiedByUserId,
+                    ModifiedDate = p.ModifiedDate,
+                }).ToListAsync();
+        }
+
+        /// <summary>
+        /// Mirrors <c>PageRepository.GetPageInfoByTag</c>: delegates to <see cref="GetPageInfoByTags"/> with a
+        /// single-element list - both the reference implementation and this one clean <paramref name="tag"/> the
+        /// same way (<see cref="TwNavigation.Clean"/>) and run the exact same underlying query
+        /// (GetPageInfoByTags.sql, despite the reference building its own single-entry <c>TempTags</c> table
+        /// separately rather than calling its own <c>GetPageInfoByTags</c> method), so delegating here reduces
+        /// duplication without changing behavior.
+        /// </summary>
+        public async Task<List<TwPage>> GetPageInfoByTag(string tag)
+            => await GetPageInfoByTags([tag]);
+
+        /// <summary>
+        /// Mirrors UpdatePageTags.sql: replaces all Pages.PageTag rows for <paramref name="pageId"/> with
+        /// <paramref name="tags"/> (deduplicated by cleaned <see cref="TwNavigation.Clean"/> navigation, keeping
+        /// the first literal spelling per navigation - the reference's own <c>DistinctBy(o => o.Navigation)</c> -
+        /// then dropping any entry whose literal tag text is null/empty, the reference script's own <c>WHERE
+        /// Coalesce(T.[Tag], '') &lt;&gt; ''</c> insert-time filter), wrapped in a single transaction (the
+        /// reference's own <c>BEGIN TRANSACTION</c>/<c>COMMIT TRANSACTION</c>) - delete-then-insert, not a
+        /// diff/merge. An empty (post-filtering) <paramref name="tags"/> list still deletes the page's existing
+        /// tags (matching the reference's unconditional <c>DELETE FROM PageTag WHERE PageId = @PageId</c>) and
+        /// simply inserts nothing.
+        /// </summary>
+        public async Task UpdatePageTags(int pageId, List<string> tags)
+        {
+            var paramTags = tags
+                .Select(t => new { Tag = t, Navigation = TwNavigation.Clean(t) })
+                .DistinctBy(t => t.Navigation)
+                .Where(t => !string.IsNullOrEmpty(t.Tag))
+                .ToList();
+
+            using var context = _createContext();
+            using var transaction = await context.Database.BeginTransactionAsync();
+
+            await context.Pages_PageTags
+                .Where(t => t.PageId == pageId)
+                .ExecuteDeleteAsync();
+
+            if (paramTags.Count > 0)
+            {
+                context.Pages_PageTags.AddRange(paramTags.Select(t => new PagesEntities.PageTag
+                {
+                    PageId = pageId,
+                    Tag = t.Tag,
+                    Navigation = t.Navigation,
+                }));
+
+                await context.SaveChangesAsync();
+            }
+
+            await transaction.CommitAsync();
+        }
 
         public Task<int> UpsertPage(ITwEngine wikifier, ITwSharedLocalizationText localizer, TwPage page, ITwSessionState? sessionState = null)
             => throw new NotImplementedException();
@@ -1439,8 +2149,90 @@ namespace TightWiki.Data.EfCore.Repositories
         public Task RefreshPageMetadata(ITwEngine wikifier, ITwSharedLocalizationText localizer, TwPage page, ITwSessionState? sessionState = null)
             => throw new NotImplementedException();
 
-        public Task<List<TwAggregatedSearchToken>> ParsePageTokens(ITwEngineState state)
-            => throw new NotImplementedException();
+        /// <summary>
+        /// Mirrors <c>PageRepository.ParsePageTokens</c>: tokenizes <paramref name="state"/>'s rendered HTML,
+        /// page description, tags, and page name (each with its own weight multiplier - 1/1.2/1.4/1.6
+        /// respectively, same as the reference), then aggregates by token text into one row per distinct token
+        /// with its <see cref="TwAggregatedSearchToken.DoubleMetaphone"/> code and summed weight, via
+        /// <see cref="ComputeParsedPageTokens"/>.
+        /// </summary>
+        /// <remarks>
+        /// This method - and the private <see cref="ComputeParsedPageTokens"/> helper it calls - have no
+        /// dependency on any of the still-<see cref="NotImplementedException"/> members of this class (in
+        /// particular, unlike <c>PageRepository.RefreshPageMetadata</c> - phase 2b.6, still a stub here - this
+        /// method never calls <see cref="UpsertPage"/>/<see cref="RefreshPageMetadata"/> itself, only the other
+        /// way around), so it is fully functional as of this phase even though its only real caller
+        /// (<see cref="RefreshPageMetadata"/>) is not yet implemented.
+        /// </remarks>
+        public async Task<List<TwAggregatedSearchToken>> ParsePageTokens(ITwEngineState state)
+        {
+            var parsedTokens = new List<WeightedSearchToken>();
+
+            parsedTokens.AddRange(await ComputeParsedPageTokens(state.HtmlResult, 1));
+            parsedTokens.AddRange(await ComputeParsedPageTokens(state.Page.Description, 1.2));
+            parsedTokens.AddRange(await ComputeParsedPageTokens(string.Join(" ", state.Tags), 1.4));
+            parsedTokens.AddRange(await ComputeParsedPageTokens(state.Page.Name, 1.6));
+
+            return parsedTokens
+                .GroupBy(o => o.Token)
+                .Select(o => new TwAggregatedSearchToken
+                {
+                    Token = o.Key,
+                    DoubleMetaphone = o.Key.ToDoubleMetaphone(),
+                    Weight = o.Sum(g => g.Weight),
+                }).ToList();
+        }
+
+        /// <summary>
+        /// Mirrors <c>PageRepository.ComputeParsedPageTokens</c>: strips HTML from <paramref name="content"/>
+        /// (<c>NTDLS.Helpers.Html.StripHtml</c>), splits on whitespace/hyphen/underscore, optionally also splits
+        /// camel-cased tokens into their component words (<c>NTDLS.Helpers.Text.SplitCamelCase</c>, gated by the
+        /// "Split Camel Case" search setting - split words are added alongside the original tokens, not in place
+        /// of them, same as the reference), lower-invariants everything, drops any token listed in the
+        /// "Word Exclusions" search setting (comma/semicolon-separated), then groups by token text into a
+        /// per-token count-based weight (occurrence count * <paramref name="weightMultiplier"/>), dropping
+        /// whitespace-only tokens.
+        /// </summary>
+        private async Task<List<WeightedSearchToken>> ComputeParsedPageTokens(string content, double weightMultiplier)
+        {
+            var searchConfig = await _configurationRepository.GetConfigurationEntryValuesByGroupName(TwConfigGroup.Search);
+
+            var exclusionWords = searchConfig?.Value<string>("Word Exclusions")?
+                .Split([',', ';'], StringSplitOptions.RemoveEmptyEntries).Distinct() ?? new List<string>();
+            var strippedContent = Html.StripHtml(content);
+
+            var tokens = strippedContent.Split([' ', '\n', '\t', '-', '_']).ToList();
+
+            if (searchConfig?.Value<bool>("Split Camel Case") == true)
+            {
+                var allSplitTokens = new List<string>();
+
+                foreach (var token in tokens)
+                {
+                    var splitTokens = Text.SplitCamelCase(token);
+                    if (splitTokens.Count > 1)
+                    {
+                        splitTokens.ForEach(t => allSplitTokens.Add(t));
+                    }
+                }
+
+                tokens.AddRange(allSplitTokens);
+            }
+
+            tokens = tokens.ConvertAll(d => d.ToLowerInvariant());
+
+            tokens.RemoveAll(o => exclusionWords.Contains(o));
+
+            var searchTokens = (from w in tokens
+                                 group w by w into g
+                                 select new WeightedSearchToken
+                                 {
+                                     Token = g.Key,
+                                     Weight = g.Count() * weightMultiplier
+                                 }).ToList();
+
+            return searchTokens.Where(o => string.IsNullOrWhiteSpace(o.Token) == false).ToList();
+        }
 
         #region Page File.
 

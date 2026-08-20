@@ -16,6 +16,13 @@
 			SQLite dependency) and is safe to reference directly from this provider-agnostic project.
 		-->
 		<PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.10" />
+		<!--
+			Needed by EfPageRepository's search-token helpers (GetFuzzyPageSearchTokens/GetExactPageSearchTokens/
+			ParsePageTokens's ComputeParsedPageTokens) for the same DoubleMetaphone phonetic-encoding extension
+			method the SQLite reference (TightWiki.Repository.PageRepository) uses - fuzzy/exact search scoring
+			runs in C#, not SQL, on both sides (Database-Providers-Plan.md phase 2b.5).
+		-->
+		<PackageReference Include="DuoVia.FuzzyStrings" Version="2.1.0" />
 	</ItemGroup>
 
 	<!--
