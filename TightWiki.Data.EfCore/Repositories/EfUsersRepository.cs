@@ -59,7 +59,12 @@ namespace TightWiki.Data.EfCore.Repositories
     /// schema, unreachable by any caller in the solution, predating the ASP.NET Identity migration) - see this
     /// project's <c>CLAUDE.md</c>/commit history for the escalation writeup. The remaining 2 members - <see
     /// cref="ValidateEncryptionAndCreateAdminUser"/>/<see cref="UpsertUserClaims"/> (initial admin-user
-    /// bootstrapping) - remain out of scope for phase 2b.13 and still throw <see cref="NotImplementedException"/>.
+    /// bootstrapping, called from <c>TightWiki/Program.cs</c>'s post-<c>builder.Build()</c> scope with a
+    /// DI-resolved <see cref="UserManager{TUser}"/> passed in directly by the caller - unlike every other member
+    /// in this class, neither needs a constructor-injected <see cref="UserManager{TUser}"/> factory of its own) -
+    /// were implemented for real in phase 2b.13; see each member's own doc comment, including two confirmed,
+    /// long-standing reference bugs (both introduced together in commit <c>e5b230aa</c>, "Cleanup.", and never
+    /// touched since) that are deliberately not reproduced.
     /// </para>
     /// <para>
     /// Takes a <see cref="Func{TightWikiDbContext}"/>/<see cref="Func{ApplicationDbContext}"/> pair rather than an
@@ -2060,11 +2065,200 @@ namespace TightWiki.Data.EfCore.Repositories
 
         #region Security.
 
+        /// <summary>
+        /// Mirrors <c>UsersRepository.ValidateEncryptionAndCreateAdminUser</c>: on first run (<see
+        /// cref="ITwConfigurationRepository.IsFirstRun"/>), clears the admin-password-changed state (<see
+        /// cref="SetAdminPasswordClear"/>), then - only if <see cref="AdminPasswordStatus"/> still reports <see
+        /// cref="TwAdminPasswordChangeState.NeedsToBeSet"/> - creates (or reuses, by <see
+        /// cref="Constants.DEFAULTUSERNAME"/>) the built-in admin <see cref="IdentityUser"/> via <paramref
+        /// name="userManager"/>, confirms its email, grants it the "Administrator" claim role plus the
+        /// Users.ConfigurationEntry-driven default timezone/country/language claims (<see cref="UpsertUserClaims"/>),
+        /// resets its password to <see cref="Constants.DEFAULTPASSWORD"/>, marks the admin password as default
+        /// (<see cref="SetAdminPasswordIsDefault"/>), and finally ensures a Users.Profile row exists for it under
+        /// <see cref="Constants.DEFAULTACCOUNT"/> - creating one (<see cref="CreateProfile"/>) if none exists yet,
+        /// or re-pointing an existing one at the (re)created Identity user's id (<see cref="SetProfileUserId"/>)
+        /// otherwise, exactly as the reference intends.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Two confirmed, long-standing bugs in the reference are deliberately <b>not</b> reproduced here - both
+        /// were introduced together in commit <c>e5b230aa</c> ("Cleanup.") and have never been touched since
+        /// (confirmed via <c>git log --follow -p</c>), so neither is a recent regression:
+        /// <list type="bullet">
+        /// <item><description>
+        /// The reference's own final "did the password reset succeed?" check
+        /// (<c>if (!result.Succeeded) { throw new Exception(string.Join("\r\n",
+        /// emailUpdateResult.Errors.Select(...))); }</c>) references the wrong variable - <c>emailUpdateResult</c>
+        /// (the email-update call's result, already known to have succeeded at that point, so always an empty
+        /// <c>Errors</c> collection) instead of <c>result</c> (the actual <c>ResetPasswordAsync</c> result being
+        /// checked) - so a real password-reset failure would throw with an empty/misleading message instead of the
+        /// actual Identity errors. This uses the correct <c>result.Errors</c> instead.
+        /// </description></item>
+        /// <item><description>
+        /// The reference's own final "does a profile already exist?" check
+        /// (<c>var existingProfileUserId = GetUserAccountIdByNavigation(...); if (existingProfileUserId == null)</c>)
+        /// is missing an <c>await</c> - <c>existingProfileUserId</c> ends up holding the still-running
+        /// <c>Task&lt;Guid?&gt;</c> object itself (never <see langword="null"/>), not its resolved value, so the
+        /// condition is always <see langword="false"/> and the reference always takes the "profile already exists"
+        /// branch (<c>SetProfileUserId</c>), never the "create it" branch (<c>CreateProfile</c>) - on a genuinely
+        /// fresh install with no pre-existing Users.Profile row for <see cref="Constants.DEFAULTACCOUNT"/>, that
+        /// <c>UPDATE ... WHERE Navigation = @Navigation</c> silently affects zero rows and the admin account ends
+        /// up with no profile at all. Doubly so because even a properly-awaited call would still never observe
+        /// <see langword="null"/> here: <see cref="GetUserAccountIdByNavigation"/>'s own doc comment already
+        /// documents that it returns <see cref="Guid.Empty"/>, not <see langword="null"/>, for "no such profile" -
+        /// mirroring the reference script's own <c>QueryFirstOrDefaultAsync&lt;Guid&gt;</c> non-nullable-projection
+        /// behavior. This awaits the call and treats both <see langword="null"/> and <see cref="Guid.Empty"/> as
+        /// "no profile exists yet", so a genuinely fresh install now gets one created.
+        /// </description></item>
+        /// </list>
+        /// </para>
+        /// <para>
+        /// A third bug - this one in <c>TightWiki/Program.cs</c>'s shared (not <c>#if</c>-gated) call site rather
+        /// than in <see cref="ITwUsersRepository.ValidateEncryptionAndCreateAdminUser"/>'s SQLite implementation
+        /// itself - is also deliberately not reproduced, and is the reason this member is a thin synchronous
+        /// wrapper around <see cref="ValidateEncryptionAndCreateAdminUserAsync"/> rather than the reference's own
+        /// <see langword="async void"/> method body directly. <c>Program.cs</c> resolves <paramref
+        /// name="userManager"/> from a manually created <c>using (var scope = app.Services.CreateScope())</c> block
+        /// and calls this member as the last statement inside it, without <c>await</c> (impossible anyway - the
+        /// interface member is <see langword="void"/>, not <see cref="Task"/>). The SQLite reference implements this
+        /// the same way the interface demands - <see langword="async void"/> - which resumes past its first
+        /// <see langword="await"/> (<c>_configurationRepository.IsFirstRun()</c>) as a queued continuation on a
+        /// thread-pool thread, by which point <c>Program.cs</c>'s <c>using</c> block has already disposed
+        /// <paramref name="userManager"/> (and everything else in that scope). Confirmed live against SQL Server
+        /// LocalDB (built with <c>-p:DataProvider=SqlServer</c>): reproducing the reference's <see
+        /// langword="async void"/> shape verbatim here made every startup crash the whole process with an unhandled
+        /// <see cref="ObjectDisposedException"/> ("Cannot access a disposed object... UserManager`1") thrown from a
+        /// thread-pool continuation - unrecoverable, since <c>Program.cs</c>'s own <see langword="try"/>/<see
+        /// langword="catch"/> around the call can only ever observe exceptions from the synchronous portion of an
+        /// <see langword="async void"/> method (everything up to its first <see langword="await"/>), never from
+        /// later continuations. This bug is latent, not absent, under the SQLite driver: <c>Microsoft.Data.Sqlite</c>'s
+        /// ADO.NET provider does not perform genuine asynchronous I/O (a well-documented limitation - SQLite has no
+        /// async C API), so every <see langword="await"/> in the reference's call graph resolves an
+        /// already-completed <see cref="Task"/> and the whole method runs to completion synchronously on the
+        /// caller's own thread before ever returning - the same race condition exists in principle, it simply never
+        /// gets a chance to manifest. Blocking here via <see cref="Task.GetAwaiter"/>/<c>GetResult()</c> (safe: no
+        /// captured <see cref="System.Threading.SynchronizationContext"/> exists on the plain thread-pool/<c>Main</c>
+        /// thread this runs on, so there is nothing to deadlock against) makes this member actually synchronous from
+        /// the caller's point of view again, restoring both the intended "the whole bootstrap finished, or this
+        /// member threw, before <c>Program.cs</c> moves on" semantics and the caller's <see langword="try"/>/<see
+        /// langword="catch"/>'s ability to observe every failure - not just synchronous ones - regardless of
+        /// provider. Not applicable to <see cref="UpsertUserClaims"/> (also called from <c>Program.cs</c>, but only
+        /// indirectly from within <see cref="ValidateEncryptionAndCreateAdminUserAsync"/>, and independently by
+        /// every other caller as a properly awaited <see cref="Task"/>-returning member from a request-lifetime
+        /// scope, not a use-and-immediately-dispose one).
+        /// </para>
+        /// </remarks>
         public void ValidateEncryptionAndCreateAdminUser(UserManager<IdentityUser> userManager)
-            => throw new NotImplementedException();
+            => ValidateEncryptionAndCreateAdminUserAsync(userManager).GetAwaiter().GetResult();
 
-        public Task UpsertUserClaims(UserManager<IdentityUser> userManager, IdentityUser user, List<Claim> givenClaims)
-            => throw new NotImplementedException();
+        /// <summary>
+        /// The fully asynchronous body behind <see cref="ValidateEncryptionAndCreateAdminUser"/> - see that
+        /// member's doc comment/remarks for the full behavior and for why it is invoked via a blocking
+        /// <c>GetAwaiter().GetResult()</c> wrapper rather than being <see langword="async void"/> itself.
+        /// </summary>
+        private async Task ValidateEncryptionAndCreateAdminUserAsync(UserManager<IdentityUser> userManager)
+        {
+            if (await _configurationRepository.IsFirstRun())
+            {
+                //If this is the first time the app has run on this machine (based on an encryption key) then clear
+                //the admin password status. This will cause the application to set the admin password to the
+                //default password and display a warning until it is changed.
+                await SetAdminPasswordClear();
+            }
+
+            if (await AdminPasswordStatus() == TwAdminPasswordChangeState.NeedsToBeSet)
+            {
+                var user = await userManager.FindByNameAsync(Constants.DEFAULTUSERNAME);
+                if (user == null)
+                {
+                    var creationResult = await userManager.CreateAsync(new IdentityUser(Constants.DEFAULTUSERNAME), Constants.DEFAULTPASSWORD);
+                    if (!creationResult.Succeeded)
+                    {
+                        throw new Exception(string.Join("\r\n", creationResult.Errors.Select(o => o.Description)));
+                    }
+
+                    user = await userManager.FindByNameAsync(Constants.DEFAULTUSERNAME);
+                }
+
+                user.EnsureNotNull();
+
+                user.Email = Constants.DEFAULTUSERNAME; // Ensure email is set or updated
+                user.EmailConfirmed = true;
+                var emailUpdateResult = await userManager.UpdateAsync(user);
+                if (!emailUpdateResult.Succeeded)
+                {
+                    throw new Exception(string.Join("\r\n", emailUpdateResult.Errors.Select(o => o.Description)));
+                }
+
+                var membershipConfig = await _configurationRepository.GetConfigurationEntryValuesByGroupName(TwConfigGroup.Membership);
+
+                var claimsToAdd = new List<Claim>
+                {
+                    new (ClaimTypes.Role, "Administrator"),
+                    new ("timezone", membershipConfig.Value<string>("Default TimeZone").EnsureNotNull()),
+                    new (ClaimTypes.Country, membershipConfig.Value<string>("Default Country").EnsureNotNull()),
+                    new ("language", membershipConfig.Value<string>("Default Language").EnsureNotNull()),
+                };
+
+                await UpsertUserClaims(userManager, user, claimsToAdd);
+
+                var token = await userManager.GeneratePasswordResetTokenAsync(user);
+                var result = await userManager.ResetPasswordAsync(user, token, Constants.DEFAULTPASSWORD);
+                if (!result.Succeeded)
+                {
+                    // Not reproduced: the SQLite reference references emailUpdateResult.Errors here instead of
+                    // result.Errors - see this member's <remarks> for the full writeup.
+                    throw new Exception(string.Join("\r\n", result.Errors.Select(o => o.Description)));
+                }
+
+                await SetAdminPasswordIsDefault();
+
+                // Not reproduced: the SQLite reference is missing an "await" on GetUserAccountIdByNavigation here
+                // (and even awaited, that member never returns null - see this member's <remarks> for the full
+                // writeup), so it always falls into the "else" branch below. This awaits the call and treats
+                // Guid.Empty the same as null.
+                var existingProfileUserId = await GetUserAccountIdByNavigation(TwNavigation.Clean(Constants.DEFAULTACCOUNT));
+                if (existingProfileUserId == null || existingProfileUserId == Guid.Empty)
+                {
+                    await CreateProfile(Guid.Parse(user.Id), Constants.DEFAULTACCOUNT);
+                }
+                else
+                {
+                    await SetProfileUserId(Constants.DEFAULTACCOUNT, Guid.Parse(user.Id));
+                }
+            }
+        }
+
+        /// <summary>
+        /// Mirrors <c>UsersRepository.UpsertUserClaims</c>: for each of <paramref name="givenClaims"/>, removes any
+        /// existing claim of the same <see cref="Claim.Type"/> already on <paramref name="user"/> (if present),
+        /// then adds the new claim - all purely against ASP.NET Core Identity's <paramref name="userManager"/>, no
+        /// <see cref="TightWikiDbContext"/>/<see cref="ApplicationDbContext"/> access needed here at all, since
+        /// Identity itself already persists claims via its own <c>AddEntityFrameworkStores&lt;ApplicationDbContext&gt;()</c>
+        /// registration regardless of which provider is active. Throws if the final <c>userManager.UpdateAsync(user)</c>
+        /// does not succeed, same as the reference.
+        /// </summary>
+        public async Task UpsertUserClaims(UserManager<IdentityUser> userManager, IdentityUser user, List<Claim> givenClaims)
+        {
+            var existingClaims = await userManager.GetClaimsAsync(user);
+
+            foreach (var givenClaim in givenClaims)
+            {
+                var existingClaim = existingClaims.FirstOrDefault(c => c.Type == givenClaim.Type);
+                if (existingClaim != null)
+                {
+                    await userManager.RemoveClaimAsync(user, existingClaim);
+                }
+
+                await userManager.AddClaimAsync(user, givenClaim);
+            }
+
+            var result = await userManager.UpdateAsync(user);
+            if (!result.Succeeded)
+            {
+                throw new Exception(string.Join("<br />\r\n", result.Errors.Select(o => o.Description)));
+            }
+        }
 
         #endregion
     }
