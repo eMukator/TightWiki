@@ -23,7 +23,7 @@ namespace TightWiki.Data.EfCore.Repositories
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Still a partial skeleton (Database-Providers-Plan.md phase 2b.1-2b.6) - 26 of 86 members still throw
+    /// Still a partial skeleton (Database-Providers-Plan.md phase 2b.1-2b.7) - 15 of 86 members still throw
     /// <see cref="NotImplementedException"/>. The first 11 (autocomplete, page-cache flushing, page comments,
     /// current-page-editors) were implemented for real in phase 2b.2; a further 19 page/revision metadata-read
     /// members (<see cref="GetPageRevisionInfoById"/>, <see cref="GetPageNavigationByPageId"/>,
@@ -56,10 +56,22 @@ namespace TightWiki.Data.EfCore.Repositories
     /// <see cref="UpdateSinglePageReference"/>, and <see cref="UpdatePageReferences"/> - see <see cref="SavePage"/>'s
     /// remarks for the hash-based change detection/revision-bumping logic behind <see cref="UpsertPage"/>, and
     /// <see cref="UpdatePageReferences"/>'s remarks for the <c>TempReferences</c> replacement and a confirmed,
-    /// deliberately-not-reproduced bug in the SQLite reference script) landed in phase 2b.6. Real LINQ-based
-    /// implementations of the rest (including the <c>TempTags</c>/<c>TempNamespaces</c>/<c>TempInstructions</c>
-    /// replacements discussed in chapter 4.4 that this phase's own tag/namespace/reference/instruction methods
-    /// didn't already cover) land across phases 2b.7-2b.13.
+    /// deliberately-not-reproduced bug in the SQLite reference script) landed in phase 2b.6. A further 11 page
+    /// file/attachment members (<see cref="DetachPageRevisionAttachment"/>, <see cref="GetOrphanedPageAttachmentsPaged"/>,
+    /// <see cref="PurgeOrphanedPageAttachments"/>, <see cref="PurgeOrphanedPageAttachment"/>,
+    /// <see cref="GetPageFilesInfoByPageNavigationAndPageRevisionPaged"/>,
+    /// <see cref="GetPageFileAttachmentInfoByPageNavigationPageRevisionAndFileNavigation"/>,
+    /// <see cref="GetPageFileAttachmentByPageNavigationFileRevisionAndFileNavigation"/>,
+    /// <see cref="GetPageFileAttachmentByPageNavigationPageRevisionAndFileNavigation"/>,
+    /// <see cref="GetPageFileAttachmentRevisionsByPageAndFileNavigationPaged"/>,
+    /// <see cref="GetPageFilesInfoByPageId"/>, and <see cref="UpsertPageFile"/> - see <see cref="UpsertPageFile"/>'s
+    /// remarks for the hash-based change detection/revision-bumping logic behind file attachments (structurally
+    /// analogous to <see cref="SavePage"/>'s own page-revision logic), and
+    /// <see cref="GetPageFileInfoByFileNavigation"/>/<see cref="GetPageCurrentRevisionAttachmentByFileNavigation"/>
+    /// for the two SQLite-only, non-interface helpers <c>UpsertPageFile</c> depends on) landed in phase 2b.7. Real
+    /// LINQ-based implementations of the rest (including the <c>TempTags</c>/<c>TempNamespaces</c>/
+    /// <c>TempInstructions</c> replacements discussed in chapter 4.4 that this phase's own tag/namespace/
+    /// reference/instruction methods didn't already cover) land across phases 2b.8-2b.13.
     /// </para>
     /// <para>
     /// Takes a <see cref="Func{TightWikiDbContext}"/> rather than an injected context instance, mirroring
@@ -2610,38 +2622,642 @@ namespace TightWiki.Data.EfCore.Repositories
 
         #region Page File.
 
-        public Task DetachPageRevisionAttachment(string pageNavigation, string fileNavigation, int pageRevision)
-            => throw new NotImplementedException();
+        /// <summary>
+        /// Mirrors DetachPageRevisionAttachment.sql: deletes the Pages.PageRevisionAttachment row (if any) for
+        /// the file matching <paramref name="fileNavigation"/> on the page matching <paramref name="pageNavigation"/>,
+        /// at <paramref name="pageRevision"/>. The reference script wraps this in a correlated <c>EXISTS</c>
+        /// subquery that additionally re-joins Pages.PageRevision (confirming a snapshot row exists for
+        /// <paramref name="pageRevision"/>) and Pages.PageFileRevision (confirming the currently-attached
+        /// <see cref="PagesEntities.PageRevisionAttachment.FileRevision"/> has a matching revision row) - both are
+        /// integrity guarantees that always hold for any row this application ever writes (a
+        /// Pages.PageRevisionAttachment row is never inserted without both existing - see <see cref="SavePage"/>/
+        /// <see cref="UpsertPageFile"/>), so - like the redundant existence guard <see cref="SavePage"/>'s own
+        /// remarks already call out for InsertPageRevision.sql - they are not reproduced as separate checks here.
+        /// </summary>
+        public async Task DetachPageRevisionAttachment(string pageNavigation, string fileNavigation, int pageRevision)
+        {
+            using var context = _createContext();
 
-        public Task<List<TwOrphanedPageAttachment>> GetOrphanedPageAttachmentsPaged(int pageNumber, string? orderBy = null, string? orderByDirection = null)
-            => throw new NotImplementedException();
+            await context.Pages_PageRevisionAttachments
+                .Where(pra => pra.Page.Navigation == pageNavigation
+                    && pra.PageFile.Navigation == fileNavigation
+                    && pra.PageRevision == pageRevision)
+                .ExecuteDeleteAsync();
+        }
 
-        public Task PurgeOrphanedPageAttachments()
-            => throw new NotImplementedException();
+        /// <summary>
+        /// Mirrors GetOrphanedPageAttachments.sql: every Pages.PageFileRevision row with no matching
+        /// Pages.PageRevisionAttachment (i.e. a file revision that either was never attached to any page revision,
+        /// or has since been superseded/detached), joined back to its owning Pages.PageFile/Pages.Page via the
+        /// existing navigations rather than a manual join. Paginated by the "Pagination Size" customization
+        /// setting; <see cref="TwOrphanedPageAttachment.PaginationPageCount"/> via the reference's own
+        /// ceiling-division formula against the total (unpaginated) orphan count. Ordering mirrors
+        /// <c>RepositoryHelpers.TransposeOrderby</c> against the script's <c>--CONFIG::</c> mapping ("Page"/
+        /// "File"/"Size"/"Revision"): no <paramref name="orderBy"/> falls back to the script's own un-transposed
+        /// "ORDER BY P.[Name]" (always ascending, ignoring <paramref name="orderByDirection"/> - a literal quirk
+        /// of the reference script, same as <see cref="GetMissingPagesPaged"/>); an unrecognized
+        /// <paramref name="orderBy"/> throws, same pattern as <see cref="GetMissingPagesPaged"/>.
+        /// </summary>
+        public async Task<List<TwOrphanedPageAttachment>> GetOrphanedPageAttachmentsPaged(int pageNumber, string? orderBy = null, string? orderByDirection = null)
+        {
+            var paginationSize = await _configurationRepository.Get<int>(TwConfigGroup.Customization, "Pagination Size");
 
-        public Task PurgeOrphanedPageAttachment(int pageFileId, int revision)
-            => throw new NotImplementedException();
+            using var context = _createContext();
 
-        public Task<List<TwPageFileAttachmentInfo>> GetPageFilesInfoByPageNavigationAndPageRevisionPaged(string pageNavigation, int pageNumber, int? pageSize = null, int? pageRevision = null)
-            => throw new NotImplementedException();
+            var query = context.Pages_PageFileRevisions
+                .Where(pfr => !context.Pages_PageRevisionAttachments
+                    .Any(pra => pra.PageFileId == pfr.PageFileId && pra.FileRevision == pfr.Revision));
 
-        public Task<TwPageFileAttachmentInfo?> GetPageFileAttachmentInfoByPageNavigationPageRevisionAndFileNavigation(string pageNavigation, string fileNavigation, int? pageRevision = null)
-            => throw new NotImplementedException();
+            var totalCount = await query.CountAsync();
+            var paginationPageCount = (totalCount + (paginationSize - 1)) / paginationSize;
 
-        public Task<TwPageFileAttachment?> GetPageFileAttachmentByPageNavigationFileRevisionAndFileNavigation(string pageNavigation, string fileNavigation, int? fileRevision = null)
-            => throw new NotImplementedException();
+            bool ascending = string.Equals(orderByDirection, "asc", StringComparison.InvariantCultureIgnoreCase);
 
-        public Task<TwPageFileAttachment?> GetPageFileAttachmentByPageNavigationPageRevisionAndFileNavigation(string pageNavigation, string fileNavigation, int? pageRevision = null)
-            => throw new NotImplementedException();
+            var ordered = string.IsNullOrEmpty(orderBy)
+                ? query.OrderBy(pfr => pfr.PageFile.Page.Name)
+                : orderBy.ToUpperInvariant() switch
+                {
+                    "PAGE" => ascending ? query.OrderBy(pfr => pfr.PageFile.Page.Name) : query.OrderByDescending(pfr => pfr.PageFile.Page.Name),
+                    "FILE" => ascending ? query.OrderBy(pfr => pfr.PageFile.Name) : query.OrderByDescending(pfr => pfr.PageFile.Name),
+                    "SIZE" => ascending ? query.OrderBy(pfr => pfr.Size) : query.OrderByDescending(pfr => pfr.Size),
+                    "REVISION" => ascending ? query.OrderBy(pfr => pfr.Revision) : query.OrderByDescending(pfr => pfr.Revision),
+                    _ => throw new InvalidOperationException(
+                        $"No order by mapping was found in 'GetOrphanedPageAttachments.sql' for the field '{orderBy}'."),
+                };
 
-        public Task<List<TwPageFileAttachmentInfo>> GetPageFileAttachmentRevisionsByPageAndFileNavigationPaged(string pageNavigation, string fileNavigation, int pageNumber)
-            => throw new NotImplementedException();
+            return await ordered
+                .Skip((pageNumber - 1) * paginationSize)
+                .Take(paginationSize)
+                .Select(pfr => new TwOrphanedPageAttachment
+                {
+                    PageFileId = pfr.PageFileId,
+                    PageName = pfr.PageFile.Page.Name,
+                    Namespace = pfr.PageFile.Page.Namespace,
+                    PageNavigation = pfr.PageFile.Page.Navigation,
+                    FileName = pfr.PageFile.Name,
+                    FileNavigation = pfr.PageFile.Navigation,
+                    Size = pfr.Size,
+                    FileRevision = pfr.Revision,
+                    PaginationPageCount = paginationPageCount,
+                })
+                .ToListAsync();
+        }
 
-        public Task<List<TwPageFileAttachmentInfo>> GetPageFilesInfoByPageId(int pageId)
-            => throw new NotImplementedException();
+        /// <summary>
+        /// Mirrors PurgeOrphanedPageAttachments.sql's two-statement transaction: bulk-deletes every orphaned
+        /// Pages.PageFileRevision (same "no matching Pages.PageRevisionAttachment" predicate as
+        /// <see cref="GetOrphanedPageAttachmentsPaged"/>), then bulk-deletes every Pages.PageFile row left with
+        /// zero remaining revisions.
+        /// </summary>
+        public async Task PurgeOrphanedPageAttachments()
+        {
+            using var context = _createContext();
+            using var transaction = await context.Database.BeginTransactionAsync();
 
-        public Task UpsertPageFile(TwPageFileAttachment item, Guid userId)
-            => throw new NotImplementedException();
+            try
+            {
+                await context.Pages_PageFileRevisions
+                    .Where(pfr => !context.Pages_PageRevisionAttachments
+                        .Any(pra => pra.PageFileId == pfr.PageFileId && pra.FileRevision == pfr.Revision))
+                    .ExecuteDeleteAsync();
+
+                await context.Pages_PageFiles
+                    .Where(pf => !context.Pages_PageFileRevisions.Any(pfr => pfr.PageFileId == pf.Id))
+                    .ExecuteDeleteAsync();
+
+                await transaction.CommitAsync();
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Mirrors PurgeOrphanedPageAttachment.sql's two-statement transaction: deletes the single
+        /// Pages.PageFileRevision matching (<paramref name="pageFileId"/>, <paramref name="revision"/>), then
+        /// deletes the owning Pages.PageFile row too if that was its last remaining revision.
+        /// </summary>
+        public async Task PurgeOrphanedPageAttachment(int pageFileId, int revision)
+        {
+            using var context = _createContext();
+            using var transaction = await context.Database.BeginTransactionAsync();
+
+            try
+            {
+                await context.Pages_PageFileRevisions
+                    .Where(pfr => pfr.PageFileId == pageFileId && pfr.Revision == revision)
+                    .ExecuteDeleteAsync();
+
+                await context.Pages_PageFiles
+                    .Where(pf => pf.Id == pageFileId && !context.Pages_PageFileRevisions.Any(pfr => pfr.PageFileId == pageFileId))
+                    .ExecuteDeleteAsync();
+
+                await transaction.CommitAsync();
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Mirrors GetPageFilesInfoByPageNavigationAndPageRevisionPaged.sql: every Pages.PageRevisionAttachment
+        /// row for the page matching <paramref name="pageNavigation"/> at <paramref name="pageRevision"/>
+        /// (falling back to the page's current <see cref="PagesEntities.Page.Revision"/> when null), restricted to
+        /// attachments whose <see cref="PagesEntities.PageRevisionAttachment.FileRevision"/> equals the file's own
+        /// current <see cref="PagesEntities.PageFile.Revision"/> ("--Latest file revision." in the reference),
+        /// joined to Pages.PageFileRevision for ContentType/Size. Paginated by <paramref name="pageSize"/>
+        /// (falling back to the "Pagination Size" customization setting when null), ordered by
+        /// <see cref="PagesEntities.PageFile.Name"/> then <see cref="PagesEntities.PageRevisionAttachment.PageFileId"/>,
+        /// matching the reference's own "ORDER BY PF.[Name], PF.Id".
+        /// </summary>
+        public async Task<List<TwPageFileAttachmentInfo>> GetPageFilesInfoByPageNavigationAndPageRevisionPaged(string pageNavigation, int pageNumber, int? pageSize = null, int? pageRevision = null)
+        {
+            pageSize ??= await _configurationRepository.Get<int>(TwConfigGroup.Customization, "Pagination Size");
+
+            using var context = _createContext();
+
+            var query =
+                from pra in context.Pages_PageRevisionAttachments
+                join pfr in context.Pages_PageFileRevisions on new { pra.PageFileId, Revision = pra.FileRevision } equals new { pfr.PageFileId, pfr.Revision }
+                where pra.Page.Navigation == pageNavigation
+                    && pra.FileRevision == pra.PageFile.Revision
+                    && pra.PageRevision == (pageRevision ?? pra.Page.Revision)
+                select new { pra, pfr };
+
+            var totalCount = await query.CountAsync();
+            var paginationPageCount = (totalCount + (pageSize.Value - 1)) / pageSize.Value;
+
+            return await query
+                .OrderBy(x => x.pra.PageFile.Name).ThenBy(x => x.pra.PageFileId)
+                .Skip((pageNumber - 1) * pageSize.Value)
+                .Take(pageSize.Value)
+                .Select(x => new TwPageFileAttachmentInfo
+                {
+                    Id = x.pra.PageFileId,
+                    PageId = x.pra.PageId,
+                    Name = x.pra.PageFile.Name,
+                    ContentType = x.pfr.ContentType,
+                    Size = x.pfr.Size,
+                    CreatedDate = x.pra.PageFile.CreatedDate,
+                    FileRevision = x.pfr.Revision,
+                    FileNavigation = x.pra.PageFile.Navigation,
+                    PageNavigation = x.pra.Page.Navigation,
+                    PaginationPageSize = pageSize.Value,
+                    PaginationPageCount = paginationPageCount,
+                })
+                .ToListAsync();
+        }
+
+        /// <summary>
+        /// Mirrors GetPageFileAttachmentInfoByPageNavigationPageRevisionAndFileNavigation.sql: the single
+        /// Pages.PageRevisionAttachment row for the file matching <paramref name="fileNavigation"/> on the page
+        /// matching <paramref name="pageNavigation"/>, at <paramref name="pageRevision"/> (falling back to the
+        /// page's current <see cref="PagesEntities.Page.Revision"/> when null). The reference script computes
+        /// this via a <c>GROUP BY ... MAX(FileRevision)</c> subquery, defending against more than one attachment
+        /// existing for the same (page, file, page-revision) triple - but
+        /// <see cref="Configurations.Pages.PageRevisionAttachmentConfiguration"/>'s own unique index on exactly
+        /// that triple already makes that structurally impossible, so this picks the (necessarily unique) match
+        /// directly (<c>OrderByDescending(FileRevision).FirstOrDefault()</c> kept only as the same defensive
+        /// tie-break, never actually exercised), then joins to Pages.PageFileRevision for ContentType/Size as a
+        /// second query. <see cref="TwPageFileAttachmentInfo.CreatedByUserId"/>/<c>CreatedByUserName</c>/
+        /// <c>CreatedByNavigation</c> are left unset, matching the reference script's own column list (it
+        /// selects only Id/PageId/Name/ContentType/Size/CreatedDate).
+        /// </summary>
+        public async Task<TwPageFileAttachmentInfo?> GetPageFileAttachmentInfoByPageNavigationPageRevisionAndFileNavigation(string pageNavigation, string fileNavigation, int? pageRevision = null)
+        {
+            using var context = _createContext();
+
+            var attachment = await context.Pages_PageRevisionAttachments
+                .Where(pra => pra.Page.Navigation == pageNavigation
+                    && pra.PageFile.Navigation == fileNavigation
+                    && pra.PageRevision == (pageRevision ?? pra.Page.Revision))
+                .OrderByDescending(pra => pra.FileRevision)
+                .Select(pra => new
+                {
+                    pra.PageId,
+                    pra.PageFileId,
+                    pra.FileRevision,
+                    Name = pra.PageFile.Name,
+                    CreatedDate = pra.PageFile.CreatedDate,
+                    FileNavigation = pra.PageFile.Navigation,
+                    PageNavigation = pra.Page.Navigation,
+                })
+                .FirstOrDefaultAsync();
+
+            if (attachment == null)
+            {
+                return null;
+            }
+
+            var revision = await context.Pages_PageFileRevisions
+                .Where(pfr => pfr.PageFileId == attachment.PageFileId && pfr.Revision == attachment.FileRevision)
+                .Select(pfr => new { pfr.ContentType, pfr.Size, pfr.Revision })
+                .FirstOrDefaultAsync();
+
+            if (revision == null)
+            {
+                return null;
+            }
+
+            return new TwPageFileAttachmentInfo
+            {
+                Id = attachment.PageFileId,
+                PageId = attachment.PageId,
+                Name = attachment.Name,
+                ContentType = revision.ContentType,
+                Size = revision.Size,
+                CreatedDate = attachment.CreatedDate,
+                FileRevision = revision.Revision,
+                FileNavigation = attachment.FileNavigation,
+                PageNavigation = attachment.PageNavigation,
+            };
+        }
+
+        /// <summary>
+        /// Mirrors GetPageFileAttachmentByPageNavigationFileRevisionAndFileNavigation.sql: the Pages.PageFile
+        /// matching <paramref name="fileNavigation"/> on the page matching <paramref name="pageNavigation"/>,
+        /// joined to the Pages.PageFileRevision matching <paramref name="fileRevision"/> (falling back to the
+        /// file's own current <see cref="PagesEntities.PageFile.Revision"/> when null), including
+        /// <see cref="PagesEntities.PageFileRevision.Data"/>. No caching, matching the SQLite reference. The
+        /// reference script's own column list excludes FileNavigation/PageNavigation (unlike the sibling
+        /// <see cref="GetPageFileAttachmentByPageNavigationPageRevisionAndFileNavigation"/>), so those are left
+        /// unset here too, same as <see cref="GetPageFileAttachmentInfoByPageNavigationPageRevisionAndFileNavigation"/>'s
+        /// CreatedBy* fields.
+        /// </summary>
+        public async Task<TwPageFileAttachment?> GetPageFileAttachmentByPageNavigationFileRevisionAndFileNavigation(string pageNavigation, string fileNavigation, int? fileRevision = null)
+        {
+            using var context = _createContext();
+
+            return await (
+                from pf in context.Pages_PageFiles
+                join pfr in context.Pages_PageFileRevisions on pf.Id equals pfr.PageFileId
+                where pf.Page.Navigation == pageNavigation
+                    && pf.Navigation == fileNavigation
+                    && pfr.Revision == (fileRevision ?? pf.Revision)
+                select new TwPageFileAttachment
+                {
+                    Id = pf.Id,
+                    PageId = pf.PageId,
+                    Name = pf.Name,
+                    ContentType = pfr.ContentType,
+                    Size = pfr.Size,
+                    CreatedDate = pf.CreatedDate,
+                    Data = pfr.Data,
+                }
+            ).FirstOrDefaultAsync();
+        }
+
+        /// <summary>
+        /// Mirrors GetPageFileAttachmentByPageNavigationPageRevisionAndFileNavigation.sql: the same "current
+        /// attachment at a given page revision" lookup as
+        /// <see cref="GetPageFileAttachmentInfoByPageNavigationPageRevisionAndFileNavigation"/> (see its remarks
+        /// for why the reference's <c>GROUP BY ... MAX(FileRevision)</c> is picked directly instead), but
+        /// returning the full <see cref="PagesEntities.PageFileRevision.Data"/> rather than just metadata, and
+        /// cached under <see cref="MemCache.Category.Page"/> (same cache key shape - page navigation + file
+        /// navigation + page revision - as the SQLite reference). The reference script's own column list excludes
+        /// FileNavigation/PageNavigation, so those are left unset here too.
+        /// </summary>
+        public async Task<TwPageFileAttachment?> GetPageFileAttachmentByPageNavigationPageRevisionAndFileNavigation(string pageNavigation, string fileNavigation, int? pageRevision = null)
+        {
+            var cacheKey = MemCacheKeyFunction.Build(MemCache.Category.Page, [pageNavigation, fileNavigation, pageRevision]);
+
+            return await MemCache.AddOrGetAsync(cacheKey, async () =>
+            {
+                using var context = _createContext();
+
+                var attachment = await context.Pages_PageRevisionAttachments
+                    .Where(pra => pra.Page.Navigation == pageNavigation
+                        && pra.PageFile.Navigation == fileNavigation
+                        && pra.PageRevision == (pageRevision ?? pra.Page.Revision))
+                    .OrderByDescending(pra => pra.FileRevision)
+                    .Select(pra => new { pra.PageId, pra.PageFileId, pra.FileRevision, Name = pra.PageFile.Name, CreatedDate = pra.PageFile.CreatedDate })
+                    .FirstOrDefaultAsync();
+
+                if (attachment == null)
+                {
+                    return null;
+                }
+
+                var revision = await context.Pages_PageFileRevisions
+                    .Where(pfr => pfr.PageFileId == attachment.PageFileId && pfr.Revision == attachment.FileRevision)
+                    .FirstOrDefaultAsync();
+
+                if (revision == null)
+                {
+                    return null;
+                }
+
+                return new TwPageFileAttachment
+                {
+                    Id = attachment.PageFileId,
+                    PageId = attachment.PageId,
+                    Name = attachment.Name,
+                    ContentType = revision.ContentType,
+                    Size = revision.Size,
+                    CreatedDate = attachment.CreatedDate,
+                    Data = revision.Data,
+                };
+            });
+        }
+
+        /// <summary>
+        /// Mirrors GetPageFileAttachmentRevisionsByPageAndFileNavigationPaged.sql: every Pages.PageFileRevision
+        /// for the file matching <paramref name="fileNavigation"/> on the page matching
+        /// <paramref name="pageNavigation"/>, LEFT OUTER JOINed to Users.Profile for the uploader - via the
+        /// existing <see cref="PagesEntities.PageFileRevision.CreatedByUser"/> navigation rather than a raw
+        /// cross-database <c>ATTACH</c>, same pattern as <see cref="GetPageCommentsPaged"/>. Paginated by the
+        /// "Pagination Size" customization setting. The reference script has no <c>ORDER BY</c> at all (relying on
+        /// SQLite's incidental physical/rowid order, which happens to be ascending-by-Revision for a fixed
+        /// PageFileId given how rows are inserted); an explicit <c>OrderBy(Revision)</c> is added here since
+        /// Skip/Take pagination is not guaranteed deterministic without one on every EF Core provider (in
+        /// particular SQL Server) - a deliberate, minor deviation from the literal reference for cross-provider
+        /// correctness, not a behavioral difference for any data this application ever produces.
+        /// </summary>
+        public async Task<List<TwPageFileAttachmentInfo>> GetPageFileAttachmentRevisionsByPageAndFileNavigationPaged(string pageNavigation, string fileNavigation, int pageNumber)
+        {
+            var paginationSize = await _configurationRepository.Get<int>(TwConfigGroup.Customization, "Pagination Size");
+
+            using var context = _createContext();
+
+            var query = context.Pages_PageFileRevisions
+                .Where(pfr => pfr.PageFile.Page.Navigation == pageNavigation && pfr.PageFile.Navigation == fileNavigation);
+
+            var totalCount = await query.CountAsync();
+            var paginationPageCount = (totalCount + (paginationSize - 1)) / paginationSize;
+
+            return await query
+                .OrderBy(pfr => pfr.Revision)
+                .Skip((pageNumber - 1) * paginationSize)
+                .Take(paginationSize)
+                .Select(pfr => new TwPageFileAttachmentInfo
+                {
+                    Id = pfr.PageFile.Id,
+                    PageId = pfr.PageFile.PageId,
+                    Name = pfr.PageFile.Name,
+                    ContentType = pfr.ContentType,
+                    Size = pfr.Size,
+                    CreatedDate = pfr.CreatedDate,
+                    FileRevision = pfr.Revision,
+                    CreatedByUserId = pfr.CreatedByUserId,
+                    CreatedByUserName = pfr.CreatedByUser != null ? (pfr.CreatedByUser.AccountName ?? string.Empty) : string.Empty,
+                    CreatedByNavigation = pfr.CreatedByUser != null ? (pfr.CreatedByUser.Navigation ?? string.Empty) : string.Empty,
+                    PaginationPageSize = paginationSize,
+                    PaginationPageCount = paginationPageCount,
+                })
+                .ToListAsync();
+        }
+
+        /// <summary>
+        /// Mirrors GetPageFilesInfoByPageId.sql: the same "latest file revision, attached to the page's current
+        /// revision" shape as <see cref="GetPageFilesInfoByPageNavigationAndPageRevisionPaged"/>, but for every
+        /// attachment on <paramref name="pageId"/>, unpaginated and unordered (matching the reference, which has
+        /// no <c>ORDER BY</c>/<c>LIMIT</c>).
+        /// </summary>
+        public async Task<List<TwPageFileAttachmentInfo>> GetPageFilesInfoByPageId(int pageId)
+        {
+            using var context = _createContext();
+
+            return await (
+                from pra in context.Pages_PageRevisionAttachments
+                join pfr in context.Pages_PageFileRevisions on new { pra.PageFileId, Revision = pra.FileRevision } equals new { pfr.PageFileId, pfr.Revision }
+                where pra.PageId == pageId
+                    && pra.FileRevision == pra.PageFile.Revision
+                    && pra.PageRevision == pra.Page.Revision
+                select new TwPageFileAttachmentInfo
+                {
+                    Id = pra.PageFileId,
+                    PageId = pra.PageId,
+                    Name = pra.PageFile.Name,
+                    ContentType = pfr.ContentType,
+                    Size = pfr.Size,
+                    CreatedDate = pra.PageFile.CreatedDate,
+                    FileRevision = pfr.Revision,
+                    FileNavigation = pra.PageFile.Navigation,
+                    PageNavigation = pra.Page.Navigation,
+                }
+            ).ToListAsync();
+        }
+
+        /// <summary>
+        /// Shared helper behind <see cref="UpsertPageFile"/> - mirrors <c>PageRepository.GetPageFileInfoByFileNavigation</c>
+        /// (a SQLite-only helper taking a raw connection, not part of <see cref="ITwPageRepository"/> as of the
+        /// commit that trimmed the interface down to just what's actually needed cross-provider - see
+        /// Database-Providers-Plan.md chapter 4.1): the Pages.PageFile row for <paramref name="fileNavigation"/>
+        /// on <paramref name="pageId"/>, or null if the file has never been uploaded to this page before.
+        /// </summary>
+        private static async Task<TwPageFileRevisionAttachmentInfo?> GetPageFileInfoByFileNavigation(TightWikiDbContext context, int pageId, string fileNavigation)
+        {
+            return await context.Pages_PageFiles
+                .Where(pf => pf.PageId == pageId && pf.Navigation == fileNavigation)
+                .Select(pf => new TwPageFileRevisionAttachmentInfo
+                {
+                    PageFileId = pf.Id,
+                    PageId = pf.PageId,
+                    Revision = pf.Revision,
+                })
+                .FirstOrDefaultAsync();
+        }
+
+        /// <summary>
+        /// Shared helper behind <see cref="UpsertPageFile"/> - mirrors
+        /// <c>PageRepository.GetPageCurrentRevisionAttachmentByFileNavigation</c> (a SQLite-only helper taking a
+        /// raw connection, not part of <see cref="ITwPageRepository"/> - see
+        /// <see cref="GetPageFileInfoByFileNavigation"/>'s remarks): the Pages.PageFileRevision currently attached
+        /// to <paramref name="pageId"/>'s own current <see cref="PagesEntities.Page.Revision"/>, for the file
+        /// matching <paramref name="fileNavigation"/>, or null if that file is not currently attached to the
+        /// page's latest revision (either never attached, or detached since). Picked directly via
+        /// <c>OrderByDescending(FileRevision).FirstOrDefault()</c> rather than the reference's defensive
+        /// <c>MAX(...)</c>/<c>GROUP BY</c>, for the same reason given in
+        /// <see cref="GetPageFileAttachmentInfoByPageNavigationPageRevisionAndFileNavigation"/>'s remarks.
+        /// </summary>
+        private static async Task<TwPageFileRevisionAttachmentInfo?> GetPageCurrentRevisionAttachmentByFileNavigation(TightWikiDbContext context, int pageId, string fileNavigation)
+        {
+            var attachment = await context.Pages_PageRevisionAttachments
+                .Where(pra => pra.PageFile.PageId == pageId
+                    && pra.PageFile.Navigation == fileNavigation
+                    && pra.PageRevision == pra.Page.Revision)
+                .OrderByDescending(pra => pra.FileRevision)
+                .Select(pra => new { pra.PageFileId, pra.FileRevision })
+                .FirstOrDefaultAsync();
+
+            if (attachment == null)
+            {
+                return null;
+            }
+
+            return await context.Pages_PageFileRevisions
+                .Where(pfr => pfr.PageFileId == attachment.PageFileId && pfr.Revision == attachment.FileRevision)
+                .Select(pfr => new TwPageFileRevisionAttachmentInfo
+                {
+                    PageId = pageId,
+                    PageFileId = pfr.PageFileId,
+                    Revision = pfr.Revision,
+                    ContentType = pfr.ContentType,
+                    Size = (int)pfr.Size,
+                    DataHash = pfr.DataHash,
+                })
+                .FirstOrDefaultAsync();
+        }
+
+        /// <summary>
+        /// Mirrors <c>PageRepository.UpsertPageFile</c>'s hash-based change detection and revision-bumping, one
+        /// transaction per call - the same overall shape as <see cref="SavePage"/> (see its remarks) but for file
+        /// attachments rather than page bodies:
+        /// <list type="number">
+        /// <item>If no Pages.PageFile row exists yet for <paramref name="item"/>.FileNavigation on
+        /// <paramref name="item"/>.PageId (via <see cref="GetPageFileInfoByFileNavigation"/>), one is inserted
+        /// (Revision hardcoded to 0, matching InsertPageFile.sql) - EF Core populates the new row's identity
+        /// <c>Id</c> directly from <see cref="Microsoft.EntityFrameworkCore.DbContext.SaveChangesAsync()"/>, so
+        /// unlike the SQLite reference (which has to re-run <c>GetPageFileInfoByFileNavigation</c> a second time
+        /// after the insert to recover the newly-generated id) no second round-trip is needed here.</item>
+        /// <item>The file revision currently attached to the page's own current revision is read via
+        /// <see cref="GetPageCurrentRevisionAttachmentByFileNavigation"/>. If one exists, "changed" is a CRC32
+        /// mismatch (<see cref="TightWiki.Library.Security.SecurityUtility.Crc32(byte[])"/>, same algorithm as the
+        /// reference) between it and <paramref name="item"/>.Data; if none exists (brand-new file, or a file that
+        /// exists but is not attached to this page's current revision), it is unconditionally "changed". The
+        /// reference script also sets an initial <c>hasFileChanged = true</c> right after inserting a brand-new
+        /// Pages.PageFile row, but that assignment is immediately overwritten by this same second check before
+        /// it's ever read (a brand-new file is, by construction, also never currently attached) - so it is
+        /// provably dead code, not reproduced here.</item>
+        /// <item>Only when "changed": the file's <see cref="PagesEntities.PageFile.Revision"/> counter is bumped
+        /// (UpdatePageFileRevision.sql), a new Pages.PageFileRevision row is inserted at that revision
+        /// (InsertPageFileRevision.sql) under <paramref name="userId"/>, the page's own current
+        /// <see cref="PagesEntities.Page.Revision"/> is read via the same <paramref name="item"/>'s
+        /// transaction/context. The reference's equivalent call, <c>GetCurrentPageRevision(o, pageId)</c>, is
+        /// actually cached (it's wrapped in <c>MemCache.AddOrGetAsync</c> under the same cache key as the
+        /// parameterless public overload, since <c>MemCacheKeyFunction.Build</c> keys on <c>[CallerMemberName]</c>
+        /// - the connection parameter plays no part in the key). This EF implementation deliberately bypasses that
+        /// cache and always issues a fresh query instead, so it can never observe a value staler than the
+        /// reference's; that's safe either way because <see cref="RefreshPageMetadata"/> clears this exact cache
+        /// entry (<c>MemCache.Category.Page, [pageId]</c>) on every <see cref="UpsertPage"/>, so no stale-cache
+        /// scenario arises for either implementation in practice. The previous attachment for that page revision
+        /// (if any) is removed, and the new file revision is associated with the page's current revision
+        /// (AssociatePageFileAttachmentWithPageRevision.sql's delete-then-insert, both folded into this one
+        /// transaction).</item>
+        /// </list>
+        /// Does not call <see cref="FlushPageCache"/> or invalidate the
+        /// <see cref="GetPageFileAttachmentByPageNavigationPageRevisionAndFileNavigation"/> cache entry, matching
+        /// the SQLite reference (neither does either).
+        /// </summary>
+        public async Task UpsertPageFile(TwPageFileAttachment item, Guid userId)
+        {
+            using var context = _createContext();
+            using var transaction = await context.Database.BeginTransactionAsync();
+
+            try
+            {
+                var pageFileInfo = await GetPageFileInfoByFileNavigation(context, item.PageId, item.FileNavigation);
+                if (pageFileInfo == null)
+                {
+                    //If the page file does not exist, then insert it.
+                    var newPageFile = new PagesEntities.PageFile
+                    {
+                        PageId = item.PageId,
+                        Name = item.Name,
+                        Navigation = item.FileNavigation,
+                        CreatedDate = item.CreatedDate,
+                        Revision = 0,
+                    };
+
+                    context.Pages_PageFiles.Add(newPageFile);
+                    await context.SaveChangesAsync();
+
+                    //EF Core already gave us the new identity value - no need for a second round-trip to fetch it.
+                    pageFileInfo = new TwPageFileRevisionAttachmentInfo
+                    {
+                        PageFileId = newPageFile.Id,
+                        PageId = newPageFile.PageId,
+                        Revision = newPageFile.Revision,
+                    };
+                }
+
+                var newDataHash = SecurityUtility.Crc32(item.Data);
+
+                int currentFileRevision;
+                bool hasFileChanged;
+
+                var currentlyAttachedFile = await GetPageCurrentRevisionAttachmentByFileNavigation(context, item.PageId, item.FileNavigation);
+                if (currentlyAttachedFile != null)
+                {
+                    //The PageFile exists and a revision of it is attached to this page revision.
+                    //Keep track of the file revision, and determine if the file has changed (via the file hash).
+                    currentFileRevision = currentlyAttachedFile.Revision;
+                    hasFileChanged = currentlyAttachedFile.DataHash != newDataHash;
+                }
+                else
+                {
+                    //The file either does not exist or is not attached to the current page revision.
+                    hasFileChanged = true;
+
+                    //We determined earlier that the PageFile does exist, so keep track of the file revision.
+                    currentFileRevision = pageFileInfo.Revision;
+                }
+
+                if (hasFileChanged)
+                {
+                    currentFileRevision++;
+
+                    //Get the current page revision so that we can associate the page file attachment with the current page revision.
+                    var currentPageRevision = await context.Pages_Pages
+                        .Where(p => p.Id == item.PageId)
+                        .Select(p => p.Revision)
+                        .FirstOrDefaultAsync();
+
+                    //The file has changed (or is newly inserted), bump the file revision.
+                    await context.Pages_PageFiles
+                        .Where(pf => pf.Id == pageFileInfo.PageFileId)
+                        .ExecuteUpdateAsync(setters => setters.SetProperty(pf => pf.Revision, currentFileRevision));
+
+                    //Insert the actual file data.
+                    context.Pages_PageFileRevisions.Add(new PagesEntities.PageFileRevision
+                    {
+                        PageFileId = pageFileInfo.PageFileId,
+                        ContentType = item.ContentType,
+                        Size = item.Size,
+                        CreatedDate = item.CreatedDate,
+                        CreatedByUserId = userId,
+                        Data = item.Data,
+                        Revision = currentFileRevision,
+                        DataHash = newDataHash,
+                    });
+
+                    await context.SaveChangesAsync();
+
+                    //Remove the previous page file revision attachment, if any.
+                    if (currentlyAttachedFile != null)
+                    {
+                        await context.Pages_PageRevisionAttachments
+                            .Where(pra => pra.PageId == item.PageId
+                                && pra.PageFileId == pageFileInfo.PageFileId
+                                && pra.FileRevision == currentlyAttachedFile.Revision
+                                && pra.PageRevision == currentPageRevision)
+                            .ExecuteDeleteAsync();
+                    }
+
+                    //Associate the latest version of the file with the latest version of the page.
+                    context.Pages_PageRevisionAttachments.Add(new PagesEntities.PageRevisionAttachment
+                    {
+                        PageId = item.PageId,
+                        PageFileId = pageFileInfo.PageFileId,
+                        FileRevision = currentFileRevision,
+                        PageRevision = currentPageRevision,
+                    });
+
+                    await context.SaveChangesAsync();
+                }
+
+                await transaction.CommitAsync();
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                throw;
+            }
+        }
 
         #endregion
 
