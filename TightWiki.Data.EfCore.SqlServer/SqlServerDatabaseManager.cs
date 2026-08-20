@@ -34,9 +34,11 @@ namespace TightWiki.Data.EfCore.SqlServer
     /// and <see cref="StatisticsRepository"/> (phase 2a.9 - <see cref="EfStatisticsRepository"/>) - all
     /// provider-agnostic LINQ living in the shared <c>TightWiki.Data.EfCore</c> project rather than here, see each
     /// class's doc comment - are real. <see cref="PageRepository"/> (<see cref="EfPageRepository"/>) and
-    /// <see cref="UsersRepository"/> (<see cref="EfUsersRepository"/>) followed the same move in phase 2b.1, but
-    /// remain <see cref="NotImplementedException"/> stubs there - only the wiring moved in 2b.1; real LINQ-based
-    /// implementations land across phases 2b.2-2b.13.
+    /// <see cref="UsersRepository"/> (<see cref="EfUsersRepository"/>) followed the same move in phase 2b.1, still
+    /// as <see cref="NotImplementedException"/> stubs (only the wiring moved in 2b.1); 11 of
+    /// <see cref="PageRepository"/>'s 86 members were implemented for real in phase 2b.2 (see
+    /// <see cref="EfPageRepository"/>'s own doc comment for which), the rest - and all of
+    /// <see cref="UsersRepository"/> - land across phases 2b.3-2b.13.
     /// </remarks>
     public class SqlServerDatabaseManager : ITwDatabaseManager, ISpannedRepository
     {
@@ -94,7 +96,7 @@ namespace TightWiki.Data.EfCore.SqlServer
             Logger = new TightWiki.Library.DatabaseLogger(LoggingRepository, minimumLogLevel);
 
             EmojiRepository = new EfEmojiRepository(CreateDbContext, ConfigurationRepository);
-            PageRepository = new EfPageRepository(CreateDbContext);
+            PageRepository = new EfPageRepository(CreateDbContext, ConfigurationRepository);
             StatisticsRepository = new EfStatisticsRepository(CreateDbContext, ConfigurationRepository);
             UsersRepository = new EfUsersRepository(CreateDbContext, CreateApplicationDbContext);
         }
