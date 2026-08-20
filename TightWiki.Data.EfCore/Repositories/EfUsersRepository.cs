@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Storage;
 using NTDLS.Helpers;
 using System.Security.Claims;
 using TightWiki.Library;
@@ -24,7 +26,7 @@ namespace TightWiki.Data.EfCore.Repositories
     /// </summary>
     /// <remarks>
     /// <para>
-    /// 12 of 51 members (the role CRUD/membership category - <see cref="IsAccountAMemberOfRole"/>,
+    /// 12 of 49 members (the role CRUD/membership category - <see cref="IsAccountAMemberOfRole"/>,
     /// <see cref="DeleteRole"/>, <see cref="InsertRole"/>, <see cref="DoesRoleExist"/>, <see cref="AutoCompleteRole"/>,
     /// <see cref="AddRoleMemberByname"/>, <see cref="AddRoleMember"/>, <see cref="AddAccountMembership"/>,
     /// <see cref="RemoveRoleMember"/>, <see cref="GetRoleByName"/>, <see cref="GetAllRoles"/>, and
@@ -47,10 +49,17 @@ namespace TightWiki.Data.EfCore.Repositories
     /// cref="UpdateProfile"/>, <see cref="UpdateProfileAvatar"/>, and <see cref="GetProfileAvatarByNavigation"/>)
     /// were implemented for real in phase 2b.11 - see each member's own doc comment for which SQLite script it
     /// mirrors, and <see cref="GetAllAccountUserRowsAsync"/>'s/<see cref="BuildFullAccountProfileAsync"/>'s
-    /// remarks for the shared cross-<see cref="ApplicationDbContext"/> logic reused across several of them. The
-    /// remaining 8 members (password-hash login lookups, the admin default-password state machine, and initial
-    /// admin-user bootstrapping) land across phases 2b.12-2b.13 and still throw <see
-    /// cref="NotImplementedException"/>.
+    /// remarks for the shared cross-<see cref="ApplicationDbContext"/> logic reused across several of them. 4 more
+    /// members (the admin default-password state machine - <see cref="AdminPasswordStatus"/>, <see
+    /// cref="SetAdminPasswordClear"/>, <see cref="SetAdminPasswordIsChanged"/>, <see
+    /// cref="SetAdminPasswordIsDefault"/>) were implemented for real in phase 2b.12.
+    /// <c>GetProfileByAccountNameOrEmailAndPasswordHash</c>/<c>GetProfileByAccountNameOrEmailAndPassword</c>, also
+    /// originally scoped to phase 2b.12, were removed from <see cref="ITwUsersRepository"/> entirely rather than
+    /// implemented: their reference SQL script was confirmed dead/broken code (columns that don't exist on this
+    /// schema, unreachable by any caller in the solution, predating the ASP.NET Identity migration) - see this
+    /// project's <c>CLAUDE.md</c>/commit history for the escalation writeup. The remaining 2 members - <see
+    /// cref="ValidateEncryptionAndCreateAdminUser"/>/<see cref="UpsertUserClaims"/> (initial admin-user
+    /// bootstrapping) - remain out of scope for phase 2b.13 and still throw <see cref="NotImplementedException"/>.
     /// </para>
     /// <para>
     /// Takes a <see cref="Func{TightWikiDbContext}"/>/<see cref="Func{ApplicationDbContext}"/> pair rather than an
@@ -1882,12 +1891,6 @@ namespace TightWiki.Data.EfCore.Repositories
             return await BuildFullAccountProfileAsync(profile);
         }
 
-        public Task<TwAccountProfile?> GetProfileByAccountNameOrEmailAndPasswordHash(string accountNameOrEmail, string passwordHash)
-            => throw new NotImplementedException();
-
-        public Task<TwAccountProfile?> GetProfileByAccountNameOrEmailAndPassword(string accountNameOrEmail, string password)
-            => throw new NotImplementedException();
-
         /// <summary>
         /// Mirrors GetProfileAvatarByNavigation.sql: the Avatar bytes and AvatarContentType of the Users.Profile
         /// row matching <paramref name="navigation"/>, or <see langword="null"/> if no such profile exists. Uses
@@ -1954,17 +1957,106 @@ namespace TightWiki.Data.EfCore.Repositories
             MemCache.ClearCategory(MemCacheKey.Build(MemCache.Category.User, [userId]));
         }
 
-        public Task<TwAdminPasswordChangeState> AdminPasswordStatus()
-            => throw new NotImplementedException();
+        /// <summary>
+        /// Mirrors <c>UsersRepository.AdminPasswordStatus</c> (no SQL script of its own beyond IsAdminPasswordChanged.sql -
+        /// it's C# glue, same "pure C# wrapper" shape as <see cref="EfConfigurationRepository.IsFirstRun"/>): reads
+        /// the single, possibly-absent Users.AdminPwCheck row (see <see cref="UsersEntities.AdminPwCheck"/>'s own
+        /// remarks) and maps its <see cref="UsersEntities.AdminPwCheck.Value"/> to
+        /// <see cref="TwAdminPasswordChangeState.HasBeenChanged"/> (1), <see cref="TwAdminPasswordChangeState.IsDefault"/>
+        /// (0), or <see cref="TwAdminPasswordChangeState.NeedsToBeSet"/> (no row at all - <see
+        /// cref="Queryable.FirstOrDefaultAsync{TSource}(IQueryable{TSource})"/> over a keyless, primary-key-less
+        /// table returns <see langword="default"/>/<see langword="null"/> for zero rows, same as the reference's own
+        /// <c>ExecuteScalarAsync&lt;bool?&gt;</c> returning <see langword="null"/> for zero rows). Once
+        /// <see cref="TwAdminPasswordChangeState.HasBeenChanged"/> has been observed once, it is cached under
+        /// <see cref="MemCache.Category.Configuration"/> (no extra key segments) and never re-queried nor
+        /// invalidated for the lifetime of the cache entry - same one-way "sticky true" caching quirk as the
+        /// reference (there is no code path, here or there, that clears this specific cache key once set), not
+        /// treated as a bug worth fixing since <see cref="SetAdminPasswordIsDefault"/>/<see cref="SetAdminPasswordClear"/>
+        /// are only ever called once, at first-run bootstrap, long before this could plausibly already be cached as
+        /// changed.
+        /// </summary>
+        public async Task<TwAdminPasswordChangeState> AdminPasswordStatus()
+        {
+            var cacheKey = MemCacheKeyFunction.Build(MemCache.Category.Configuration);
 
-        public Task SetAdminPasswordClear()
-            => throw new NotImplementedException();
+            if (MemCache.Get<bool?>(cacheKey) == true)
+            {
+                return TwAdminPasswordChangeState.HasBeenChanged;
+            }
 
-        public Task SetAdminPasswordIsChanged()
-            => throw new NotImplementedException();
+            using var context = _createContext();
+            var value = await context.AdminPwChecks.Select(a => a.Value).FirstOrDefaultAsync();
 
-        public Task SetAdminPasswordIsDefault()
-            => throw new NotImplementedException();
+            if (value == 1)
+            {
+                MemCache.Set(cacheKey, true);
+                return TwAdminPasswordChangeState.HasBeenChanged;
+            }
+            if (value == null)
+            {
+                return TwAdminPasswordChangeState.NeedsToBeSet;
+            }
+
+            return TwAdminPasswordChangeState.IsDefault;
+        }
+
+        /// <summary>
+        /// Mirrors SetAdminPasswordClear.sql ("DELETE FROM AdminPwCheck") via EF Core's LINQ bulk
+        /// <c>ExecuteDeleteAsync</c> - Users.AdminPwCheck is a keyless entity type (<c>HasNoKey()</c>), so it cannot
+        /// be tracked for <c>Add</c>/<c>Remove</c> like every other entity in this class, same reasoning as <see
+        /// cref="EfConfigurationRepository.SetCryptoCheck"/>'s own delete half.
+        /// </summary>
+        public async Task SetAdminPasswordClear()
+        {
+            using var context = _createContext();
+            await context.AdminPwChecks.ExecuteDeleteAsync();
+        }
+
+        /// <summary>
+        /// Mirrors SetAdminPasswordIsChanged.sql ("DELETE FROM AdminPwCheck; INSERT INTO AdminPwCheck(Value) SELECT 1").
+        /// See <see cref="SetAdminPwCheckValueAsync"/>'s remarks for why the insert half falls back to raw SQL.
+        /// </summary>
+        public async Task SetAdminPasswordIsChanged() => await SetAdminPwCheckValueAsync(1);
+
+        /// <summary>
+        /// Mirrors SetAdminPasswordIsDefault.sql ("DELETE FROM AdminPwCheck; INSERT INTO AdminPwCheck(Value) SELECT 0").
+        /// See <see cref="SetAdminPwCheckValueAsync"/>'s remarks for why the insert half falls back to raw SQL.
+        /// </summary>
+        public async Task SetAdminPasswordIsDefault() => await SetAdminPwCheckValueAsync(0);
+
+        /// <summary>
+        /// Shared by <see cref="SetAdminPasswordIsChanged"/>/<see cref="SetAdminPasswordIsDefault"/>: deletes then
+        /// re-inserts the single Users.AdminPwCheck row with <paramref name="value"/> - same "keyless entity type,
+        /// bulk delete plus a raw parameterized insert whose table/schema identifier is resolved and quoted via
+        /// <see cref="ISqlGenerationHelper"/>" idiom as <see cref="EfConfigurationRepository.SetCryptoCheck"/> (see
+        /// that member's remarks for why a keyless entity needs this instead of a tracked <c>Add</c>, and for why
+        /// the table name is resolved dynamically rather than hardcoding one provider's identifier quoting).
+        /// </summary>
+        private async Task SetAdminPwCheckValueAsync(int value)
+        {
+            using var context = _createContext();
+
+            await context.AdminPwChecks.ExecuteDeleteAsync();
+
+            //Built via plain string concatenation, not a C# interpolated-string literal, so that EF Core's
+            //"don't hand raw SQL an interpolated string" analyzer (EF1002) does not flag this - "{0}" below is a
+            //literal placeholder for ExecuteSqlRawAsync's own (safe, provider-parameterized) substitution, not a
+            //C# interpolation hole. quotedTable itself comes only from trusted EF metadata (never user input), so
+            //splicing it into the SQL text is not an injection risk.
+            var quotedTable = GetQuotedAdminPwCheckTableName(context);
+            var insertSql = "INSERT INTO " + quotedTable + " (Value) VALUES ({0})";
+            await context.Database.ExecuteSqlRawAsync(insertSql, value);
+        }
+
+        private static string GetQuotedAdminPwCheckTableName(TightWikiDbContext context)
+        {
+            var entityType = context.Model.FindEntityType(typeof(UsersEntities.AdminPwCheck))
+                ?? throw new InvalidOperationException(
+                    $"'{typeof(UsersEntities.AdminPwCheck)}' is not part of the {nameof(TightWikiDbContext)} model.");
+
+            var sqlGenerationHelper = context.GetService<ISqlGenerationHelper>();
+            return sqlGenerationHelper.DelimitIdentifier(entityType.GetTableName()!, entityType.GetSchema());
+        }
 
         #region Security.
 

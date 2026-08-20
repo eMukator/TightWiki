@@ -211,16 +211,6 @@ namespace TightWiki.Plugin.Interfaces.Repository
         Task<TwAccountProfile?> GetAccountProfileByNavigation(string? navigation);
 
         /// <summary>
-        /// Returns the account profile matching the specified account name or email address and password hash, or null if not found.
-        /// </summary>
-        Task<TwAccountProfile?> GetProfileByAccountNameOrEmailAndPasswordHash(string accountNameOrEmail, string passwordHash);
-
-        /// <summary>
-        /// Returns the account profile matching the specified account name or email address and plaintext password, or null if not found.
-        /// </summary>
-        Task<TwAccountProfile?> GetProfileByAccountNameOrEmailAndPassword(string accountNameOrEmail, string password);
-
-        /// <summary>
         /// Returns the avatar image for the profile at the specified navigation path, or null if not found.
         /// </summary>
         Task<TwProfileAvatar?> GetProfileAvatarByNavigation(string navigation);

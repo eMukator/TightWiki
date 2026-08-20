@@ -99,7 +99,6 @@
 		<None Remove="Scripts\GetPageRevisionsInfoByNavigationPaged.sql" />
 		<None Remove="Scripts\GetPageTagsById.sql" />
 		<None Remove="Scripts\GetProfileAvatarByNavigation.sql" />
-		<None Remove="Scripts\GetProfileByAccountNameOrEmailAndPasswordHash.sql" />
 		<None Remove="Scripts\GetRelatedPagesPaged.sql" />
 		<None Remove="Scripts\GetRoleByName.sql" />
 		<None Remove="Scripts\GetSimilarPagesPaged.sql" />
@@ -340,7 +339,6 @@
 		<EmbeddedResource Include="Scripts\GetPageRevisionsInfoByNavigationPaged.sql" />
 		<EmbeddedResource Include="Scripts\GetPageTagsById.sql" />
 		<EmbeddedResource Include="Scripts\GetProfileAvatarByNavigation.sql" />
-		<EmbeddedResource Include="Scripts\GetProfileByAccountNameOrEmailAndPasswordHash.sql" />
 		<EmbeddedResource Include="Scripts\GetRoleMembersPaged.sql" />
 		<EmbeddedResource Include="Scripts\GetRelatedPagesPaged.sql" />
 		<EmbeddedResource Include="Scripts\GetRoleByName.sql" />
