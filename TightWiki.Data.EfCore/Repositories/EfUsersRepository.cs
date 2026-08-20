@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using NTDLS.Helpers;
 using System.Security.Claims;
 using TightWiki.Library;
 using TightWiki.Library.Caching;
@@ -28,8 +29,16 @@ namespace TightWiki.Data.EfCore.Repositories
     /// <see cref="AddRoleMemberByname"/>, <see cref="AddRoleMember"/>, <see cref="AddAccountMembership"/>,
     /// <see cref="RemoveRoleMember"/>, <see cref="GetRoleByName"/>, <see cref="GetAllRoles"/>, and
     /// <see cref="GetRoleMembersPaged"/>) were implemented for real in phase 2b.9 - see each member's own doc
-    /// comment for which SQLite script it mirrors. The remaining 39 members land across phases 2b.10-2b.13 and
-    /// still throw <see cref="NotImplementedException"/>.
+    /// comment for which SQLite script it mirrors. A further 14 members (the permissions category - <see
+    /// cref="IsAccountPermissionDefined"/>, <see cref="InsertAccountPermission"/>, <see cref="IsRolePermissionDefined"/>,
+    /// <see cref="RemoveRolePermission"/>, <see cref="RemoveAccountPermission"/>, <see cref="InsertRolePermission"/>,
+    /// <see cref="GetApparentAccountPermissions"/>, both <see cref="GetApparentRolePermissions(TwRoles)"/>/
+    /// <see cref="GetApparentRolePermissions(string)"/> overloads, <see cref="GetAllPermissionDispositions"/>,
+    /// <see cref="GetAllPermissions"/>, <see cref="GetRolePermissionsPaged"/>, <see cref="GetAccountPermissionsPaged"/>,
+    /// and <see cref="GetAccountRoleMembershipPaged"/>) were implemented for real in phase 2b.10 - see each
+    /// member's own doc comment for which SQLite script it mirrors, and <see cref="ResolveResourceNameAsync"/>'s
+    /// remarks for the shared "compute a permission's effective resource name" logic reused across several of them.
+    /// The remaining 25 members land across phases 2b.11-2b.13 and still throw <see cref="NotImplementedException"/>.
     /// </para>
     /// <para>
     /// Takes a <see cref="Func{TightWikiDbContext}"/>/<see cref="Func{ApplicationDbContext}"/> pair rather than an
@@ -157,14 +166,138 @@ namespace TightWiki.Data.EfCore.Repositories
             return await context.Roles.AnyAsync(r => r.Name == name);
         }
 
-        public Task<bool> IsAccountPermissionDefined(Guid userId, int permissionId, string permissionDispositionId, string? ns, string? pageId, bool forceReCache = true)
-            => throw new NotImplementedException();
+        /// <summary>
+        /// Mirrors IsAccountPermissionDefined.sql: whether a Users.AccountPermission row already exists for
+        /// <paramref name="userId"/>/<paramref name="permissionId"/>/<paramref name="permissionDispositionId"/>
+        /// that already "covers" the requested <paramref name="ns"/>/<paramref name="pageId"/> scope. Not a plain
+        /// equality match - the reference's own <c>([Namespace] = @Namespace OR [Namespace] IS NULL) AND (PageId =
+        /// @PageId OR PageId IS NULL)</c> clause, worked through SQL's three-valued NULL logic by hand, reduces
+        /// exactly to <c>(row.Namespace IS NULL OR row.Namespace = @Namespace) AND (row.PageId IS NULL OR row.PageId
+        /// = @PageId)</c> - i.e. an existing row that is broader (global, both columns NULL) than the requested
+        /// scope counts as "already defined" too, not just an exact scope match (this is what lets the caller,
+        /// <c>AdminSecurityController.AddAccountPermission</c>, skip inserting a redundant namespace/page-scoped
+        /// permission when a global one already grants the same permission+disposition). Cached under
+        /// <see cref="MemCache.Category.Security"/>, same cache key shape as the SQLite reference. Not reproduced:
+        /// <paramref name="permissionDispositionId"/> is a stringified integer (Users.PermissionDisposition.Id) in
+        /// both this signature and the reference's own - SQLite's NUMERIC affinity coerces the bound TEXT parameter
+        /// for the <c>PermissionDispositionId = @PermissionDispositionId</c> comparison against the INTEGER column;
+        /// here it is parsed explicitly instead. A non-numeric <paramref name="permissionDispositionId"/> (never
+        /// produced by the only caller, which passes a Users.PermissionDisposition.Id selected from a dropdown)
+        /// is treated as "not defined" (<see langword="false"/>) rather than throwing, since no disposition id is
+        /// itself a valid integer format.
+        /// </summary>
+        public async Task<bool> IsAccountPermissionDefined(Guid userId, int permissionId, string permissionDispositionId, string? ns, string? pageId, bool forceReCache = true)
+        {
+            var cacheKey = MemCacheKeyFunction.Build(MemCache.Category.Security, [userId, permissionId, permissionDispositionId, ns, pageId]);
 
-        public Task<TwInsertAccountPermissionResult?> InsertAccountPermission(Guid userId, int permissionId, string permissionDisposition, string? ns, string? pageId)
-            => throw new NotImplementedException();
+            return await MemCache.AddOrGetAsync(cacheKey, forceReCache, async () =>
+            {
+                if (!int.TryParse(permissionDispositionId, out var dispositionId))
+                {
+                    return false;
+                }
 
-        public Task<bool> IsRolePermissionDefined(int roleId, int permissionId, string permissionDispositionId, string? ns, string? pageId, bool forceReCache = false)
-            => throw new NotImplementedException();
+                using var context = _createContext();
+                return await context.AccountPermissions.AnyAsync(ap =>
+                    ap.UserId == userId &&
+                    ap.PermissionId == permissionId &&
+                    ap.PermissionDispositionId == dispositionId &&
+                    (ap.Namespace == null || ap.Namespace == ns) &&
+                    (ap.PageId == null || ap.PageId == pageId));
+            });
+        }
+
+        /// <summary>
+        /// Mirrors InsertAccountPermission.sql: inserts a new Users.AccountPermission row for <paramref
+        /// name="userId"/>, then returns it joined back to its Permission/PermissionDisposition names and a
+        /// computed <see cref="TwInsertAccountPermissionResult.ResourceName"/> (see <see
+        /// cref="ResolveResourceNameAsync"/>'s remarks for the exact "Namespace wins, then literal PageId, then
+        /// '*' wildcard, then the referenced Pages.Page.Name" precedence, mirrored from the reference script's own
+        /// <c>CASE</c> expression). Not reproduced: the reference's own follow-up <c>SELECT</c> re-reads the new
+        /// row via three real <c>INNER JOIN</c>s (Permission/PermissionDisposition) plus a <c>LEFT OUTER JOIN</c>
+        /// (pages_db.Page) - under the consolidated schema's real, always-enforced FK constraints (<see
+        /// cref="Configurations.Users.AccountPermissionConfiguration"/>), a bad <paramref name="permissionId"/>/
+        /// <paramref name="permissionDisposition"/>/<paramref name="userId"/> would throw a <see
+        /// cref="Microsoft.EntityFrameworkCore.DbUpdateException"/> on <c>SaveChangesAsync</c> rather than silently
+        /// falling out of an <c>INNER JOIN</c>, so - consistent with <see cref="InsertRoleMemberAndBuildResultAsync"/>'s
+        /// reasoning - this pre-checks Permission/PermissionDisposition/Profile existence first and returns <see
+        /// langword="null"/> instead of letting that exception propagate.
+        /// </summary>
+        public async Task<TwInsertAccountPermissionResult?> InsertAccountPermission(Guid userId, int permissionId, string permissionDisposition, string? ns, string? pageId)
+        {
+            if (!int.TryParse(permissionDisposition, out var permissionDispositionId))
+            {
+                return null;
+            }
+
+            using var context = _createContext();
+
+            var permissionName = await context.Permissions.Where(p => p.Id == permissionId).Select(p => p.Name).FirstOrDefaultAsync();
+            if (permissionName == null)
+            {
+                return null;
+            }
+
+            var dispositionName = await context.PermissionDispositions.Where(pd => pd.Id == permissionDispositionId).Select(pd => pd.Name).FirstOrDefaultAsync();
+            if (dispositionName == null)
+            {
+                return null;
+            }
+
+            if (!await context.Profiles.AnyAsync(p => p.UserId == userId))
+            {
+                return null;
+            }
+
+            var accountPermission = new UsersEntities.AccountPermission
+            {
+                UserId = userId,
+                PermissionId = permissionId,
+                Namespace = ns,
+                PageId = pageId,
+                PermissionDispositionId = permissionDispositionId,
+            };
+
+            context.AccountPermissions.Add(accountPermission);
+            await context.SaveChangesAsync();
+
+            return new TwInsertAccountPermissionResult
+            {
+                Id = accountPermission.Id,
+                Permission = permissionName,
+                PermissionDisposition = dispositionName,
+                Namespace = ns,
+                PageId = pageId,
+                ResourceName = await ResolveResourceNameAsync(context, ns, pageId),
+            };
+        }
+
+        /// <summary>
+        /// Mirrors IsRolePermissionDefined.sql: same "exact or broader existing scope already covers the request"
+        /// semantics as <see cref="IsAccountPermissionDefined"/>, applied to Users.RolePermission instead of
+        /// Users.AccountPermission - see that member's remarks for the full three-valued-logic derivation and the
+        /// <paramref name="permissionDispositionId"/> string-to-int handling.
+        /// </summary>
+        public async Task<bool> IsRolePermissionDefined(int roleId, int permissionId, string permissionDispositionId, string? ns, string? pageId, bool forceReCache = false)
+        {
+            var cacheKey = MemCacheKeyFunction.Build(MemCache.Category.Security, [roleId, permissionId, permissionDispositionId, ns, pageId]);
+
+            return await MemCache.AddOrGetAsync(cacheKey, forceReCache, async () =>
+            {
+                if (!int.TryParse(permissionDispositionId, out var dispositionId))
+                {
+                    return false;
+                }
+
+                using var context = _createContext();
+                return await context.RolePermissions.AnyAsync(rp =>
+                    rp.RoleId == roleId &&
+                    rp.PermissionId == permissionId &&
+                    rp.PermissionDispositionId == dispositionId &&
+                    (rp.Namespace == null || rp.Namespace == ns) &&
+                    (rp.PageId == null || rp.PageId == pageId));
+            });
+        }
 
         /// <summary>
         /// Mirrors AutoCompleteRole.sql: Users.Role rows whose <see cref="UsersEntities.Role.Name"/> contains
@@ -358,32 +491,413 @@ namespace TightWiki.Data.EfCore.Repositories
             await context.AccountRoles.Where(ar => ar.RoleId == roleId && ar.UserId == userId).ExecuteDeleteAsync();
         }
 
-        public Task RemoveRolePermission(int id)
-            => throw new NotImplementedException();
+        /// <summary>
+        /// Mirrors RemoveRolePermission.sql via EF Core's LINQ bulk <c>ExecuteDeleteAsync</c> - same idiom as
+        /// <see cref="RemoveRoleMember"/>.
+        /// </summary>
+        public async Task RemoveRolePermission(int id)
+        {
+            using var context = _createContext();
+            await context.RolePermissions.Where(rp => rp.Id == id).ExecuteDeleteAsync();
+        }
 
-        public Task RemoveAccountPermission(int id)
-            => throw new NotImplementedException();
+        /// <summary>
+        /// Mirrors RemoveAccountPermission.sql via EF Core's LINQ bulk <c>ExecuteDeleteAsync</c> - same idiom as
+        /// <see cref="RemoveRoleMember"/>.
+        /// </summary>
+        public async Task RemoveAccountPermission(int id)
+        {
+            using var context = _createContext();
+            await context.AccountPermissions.Where(ap => ap.Id == id).ExecuteDeleteAsync();
+        }
 
-        public Task<TwInsertRolePermissionResult?> InsertRolePermission(int roleId, int permissionId, string permissionDisposition, string? ns, string? pageId)
-            => throw new NotImplementedException();
+        /// <summary>
+        /// Mirrors InsertRolePermission.sql: inserts a new Users.RolePermission row for <paramref name="roleId"/>,
+        /// then returns it joined back to its Permission/PermissionDisposition names and a computed <see
+        /// cref="TwInsertRolePermissionResult.ResourceName"/> - structurally identical to <see
+        /// cref="InsertAccountPermission"/> (see that member's remarks for the FK pre-check reasoning and <see
+        /// cref="ResolveResourceNameAsync"/>'s remarks for the resource-name precedence), except the pre-checked
+        /// foreign key is Users.Role rather than Users.Profile.
+        /// </summary>
+        public async Task<TwInsertRolePermissionResult?> InsertRolePermission(int roleId, int permissionId, string permissionDisposition, string? ns, string? pageId)
+        {
+            if (!int.TryParse(permissionDisposition, out var permissionDispositionId))
+            {
+                return null;
+            }
 
-        public Task<List<TwApparentPermission>> GetApparentAccountPermissions(Guid userId)
-            => throw new NotImplementedException();
+            using var context = _createContext();
 
-        public Task<List<TwApparentPermission>> GetApparentRolePermissions(TwRoles role)
-            => throw new NotImplementedException();
+            var permissionName = await context.Permissions.Where(p => p.Id == permissionId).Select(p => p.Name).FirstOrDefaultAsync();
+            if (permissionName == null)
+            {
+                return null;
+            }
 
-        public Task<List<TwApparentPermission>> GetApparentRolePermissions(string roleName)
-            => throw new NotImplementedException();
+            var dispositionName = await context.PermissionDispositions.Where(pd => pd.Id == permissionDispositionId).Select(pd => pd.Name).FirstOrDefaultAsync();
+            if (dispositionName == null)
+            {
+                return null;
+            }
 
-        public Task<List<TightWiki.Plugin.Models.TwPermissionDisposition>> GetAllPermissionDispositions()
-            => throw new NotImplementedException();
+            if (!await context.Roles.AnyAsync(r => r.Id == roleId))
+            {
+                return null;
+            }
 
-        public Task<List<TightWiki.Plugin.Models.TwPermission>> GetAllPermissions()
-            => throw new NotImplementedException();
+            var rolePermission = new UsersEntities.RolePermission
+            {
+                RoleId = roleId,
+                PermissionId = permissionId,
+                Namespace = ns,
+                PageId = pageId,
+                PermissionDispositionId = permissionDispositionId,
+            };
 
-        public Task<List<TwRolePermission>> GetRolePermissionsPaged(int roleId, int pageNumber, string? orderBy = null, string? orderByDirection = null, int? pageSize = null)
-            => throw new NotImplementedException();
+            context.RolePermissions.Add(rolePermission);
+            await context.SaveChangesAsync();
+
+            return new TwInsertRolePermissionResult
+            {
+                Id = rolePermission.Id,
+                Permission = permissionName,
+                PermissionDisposition = dispositionName,
+                Namespace = ns,
+                PageId = pageId,
+                ResourceName = await ResolveResourceNameAsync(context, ns, pageId),
+            };
+        }
+
+        /// <summary>
+        /// Shared by <see cref="InsertAccountPermission"/>/<see cref="InsertRolePermission"/>/<see
+        /// cref="ComputeResourceName"/>: mirrors the reference scripts' repeated <c>CASE WHEN Namespace IS NOT NULL
+        /// THEN Namespace WHEN PageId IS NOT NULL THEN CASE WHEN PageId = '*' THEN '*' ELSE PG.Name END END</c>
+        /// expression - namespace scope wins if set, otherwise the literal <c>'*'</c> wildcard if <paramref
+        /// name="pageId"/> is that literal string, otherwise the name of the Pages.Page whose Id matches <paramref
+        /// name="pageId"/> parsed as an integer (or <see langword="null"/> if it does not parse, or no such page
+        /// exists - the same "left outer join finds nothing" outcome as the reference's own <c>LEFT OUTER JOIN
+        /// pages_db.Page</c>), otherwise <see langword="null"/> if neither <paramref name="ns"/> nor <paramref
+        /// name="pageId"/> is set.
+        /// </summary>
+        private static async Task<string?> ResolveResourceNameAsync(TightWikiDbContext context, string? ns, string? pageId)
+        {
+            if (ns != null)
+            {
+                return ns;
+            }
+            if (pageId == null)
+            {
+                return null;
+            }
+            if (pageId == "*")
+            {
+                return "*";
+            }
+            if (!int.TryParse(pageId, out var parsedPageId))
+            {
+                return null;
+            }
+            return await context.Pages_Pages.Where(p => p.Id == parsedPageId).Select(p => p.Name).FirstOrDefaultAsync();
+        }
+
+        /// <summary>
+        /// In-memory equivalent of <see cref="ResolveResourceNameAsync"/>, used by <see cref="GetRolePermissionsPaged"/>/
+        /// <see cref="GetAccountPermissionsPaged"/> against a pre-fetched <paramref name="pageNamesById"/> lookup
+        /// (built once for the whole result set, see those members' remarks) rather than issuing one query per row.
+        /// </summary>
+        private static string? ComputeResourceName(string? ns, string? pageId, IReadOnlyDictionary<int, string> pageNamesById)
+        {
+            if (ns != null)
+            {
+                return ns;
+            }
+            if (pageId == null)
+            {
+                return null;
+            }
+            if (pageId == "*")
+            {
+                return "*";
+            }
+            if (!int.TryParse(pageId, out var parsedPageId))
+            {
+                return null;
+            }
+            return pageNamesById.TryGetValue(parsedPageId, out var name) ? name : null;
+        }
+
+        /// <summary>
+        /// Same resource-scope precedence as <see cref="ComputeResourceName"/>, but returning the <c>'N-'</c>/
+        /// <c>'P-'</c>-prefixed sort key the reference scripts' own <c>--CONFIG::</c> "Resource" mapping computes
+        /// (<c>CASE WHEN Namespace IS NOT NULL THEN 'N-' || Namespace WHEN PageId IS NOT NULL THEN CASE WHEN PageId
+        /// = '*' THEN 'P-' || '*' ELSE 'P-' || PG.Name END END</c>) - the prefix keeps namespace-scoped and
+        /// page-scoped rows from interleaving when sorted by resource name, exactly as in the reference.
+        /// </summary>
+        private static string? ComputeResourceSortKey(string? ns, string? pageId, IReadOnlyDictionary<int, string> pageNamesById)
+        {
+            if (ns != null)
+            {
+                return "N-" + ns;
+            }
+            if (pageId == null)
+            {
+                return null;
+            }
+            if (pageId == "*")
+            {
+                return "P-*";
+            }
+            if (!int.TryParse(pageId, out var parsedPageId))
+            {
+                return null;
+            }
+            return pageNamesById.TryGetValue(parsedPageId, out var name) ? "P-" + name : null;
+        }
+
+        /// <summary>
+        /// Mirrors GetApparentAccountPermissions.sql: the union of every Users.RolePermission row for every role
+        /// <paramref name="userId"/> is a member of, with every direct Users.AccountPermission row for that same
+        /// user - the "effective"/apparent permission set a user actually has, before namespace/page-scope
+        /// resolution happens elsewhere in the caller. Translated as a single provider-translatable LINQ <see
+        /// cref="Queryable.Union{TSource}(IQueryable{TSource}, IEnumerable{TSource})"/> of the two shaped
+        /// projections (SQL <c>UNION</c>, same operator and de-duplication semantics as the reference script's own
+        /// <c>UNION</c> - not <c>UNION ALL</c>) rather than materializing both sides and de-duplicating in memory.
+        /// Cached under <see cref="MemCache.Category.Security"/>, same cache key shape as the reference. Not
+        /// reproduced: the reference caches via <c>MemCache.AddOrGet</c> (the non-async overload) around an
+        /// <see langword="async"/> lambda, which ends up caching the still-running <see cref="Task{TResult}"/>
+        /// itself rather than its resolved result - functionally harmless (an already-completed <see
+        /// cref="Task{TResult}"/> can be awaited repeatedly with the same result) but not a pattern worth
+        /// reproducing; this uses the async-correct <see cref="MemCache.AddOrGetAsync{T}(ITwCacheKey, MemCache.GetValueDelegateAsync{T}, TimeSpan?)"/>
+        /// overload instead, same as <see cref="GetApparentRolePermissions(string)"/> already does.
+        /// </summary>
+        public async Task<List<TwApparentPermission>> GetApparentAccountPermissions(Guid userId)
+        {
+            var cacheKey = MemCacheKeyFunction.Build(MemCache.Category.Security, [userId]);
+
+            return (await MemCache.AddOrGetAsync(cacheKey, async () =>
+            {
+                using var context = _createContext();
+
+                var rolePermissions =
+                    from rp in context.RolePermissions
+                    join ar in context.AccountRoles on rp.RoleId equals ar.RoleId
+                    where ar.UserId == userId
+                    select new TwApparentPermission
+                    {
+                        Permission = rp.Permission.Name,
+                        PermissionDisposition = rp.PermissionDisposition.Name,
+                        Namespace = rp.Namespace,
+                        PageId = rp.PageId,
+                    };
+
+                // Note: the reference script inner-joins this branch against Profile (Profile.UserId = AP.UserId)
+                // as well, but that join is a no-op here: AccountPermissionConfiguration declares AccountPermission.
+                // UserId as IsRequired() with a real FK onto Profile.UserId, so no AccountPermission row can exist
+                // in this schema without a matching Profile row - the join can never filter anything out.
+                var accountPermissions =
+                    from ap in context.AccountPermissions
+                    where ap.UserId == userId
+                    select new TwApparentPermission
+                    {
+                        Permission = ap.Permission.Name,
+                        PermissionDisposition = ap.PermissionDisposition.Name,
+                        Namespace = ap.Namespace,
+                        PageId = ap.PageId,
+                    };
+
+                return await rolePermissions.Union(accountPermissions).ToListAsync();
+            })).EnsureNotNull();
+        }
+
+        /// <summary>
+        /// Mirrors GetApparentRolePermissions.sql via <see cref="TwRoles.ToString"/> resolving to the role's Name -
+        /// same delegation as the SQLite reference's own C# overload.
+        /// </summary>
+        public async Task<List<TwApparentPermission>> GetApparentRolePermissions(TwRoles role)
+            => await GetApparentRolePermissions(role.ToString());
+
+        /// <summary>
+        /// Mirrors GetApparentRolePermissions.sql: every distinct Permission/PermissionDisposition/Namespace/PageId
+        /// combination assigned directly to the Users.Role named <paramref name="roleName"/> (no membership join -
+        /// unlike <see cref="GetApparentAccountPermissions"/>, this is scoped to one role's own grants, not a
+        /// user's inherited set). <c>Distinct()</c> is translated server-side to SQL <c>SELECT DISTINCT</c>, same
+        /// as the reference script's own <c>SELECT DISTINCT</c>. Cached under <see cref="MemCache.Category.Security"/>,
+        /// same cache key shape as the reference.
+        /// </summary>
+        public async Task<List<TwApparentPermission>> GetApparentRolePermissions(string roleName)
+        {
+            var cacheKey = MemCacheKeyFunction.Build(MemCache.Category.Security, [roleName]);
+
+            return (await MemCache.AddOrGetAsync(cacheKey, async () =>
+            {
+                using var context = _createContext();
+
+                return await context.RolePermissions
+                    .Where(rp => rp.Role.Name == roleName)
+                    .Select(rp => new TwApparentPermission
+                    {
+                        Permission = rp.Permission.Name,
+                        PermissionDisposition = rp.PermissionDisposition.Name,
+                        Namespace = rp.Namespace,
+                        PageId = rp.PageId,
+                    })
+                    .Distinct()
+                    .ToListAsync();
+            })).EnsureNotNull();
+        }
+
+        /// <summary>
+        /// Mirrors GetAllPermissionDispositions.sql: every Users.PermissionDisposition row (the fixed "Allow"/"Deny"
+        /// set), ordered by Name. Cached under <see cref="MemCache.Category.Security"/>, same cache key shape
+        /// (no extra segments) as the reference.
+        /// </summary>
+        public async Task<List<TightWiki.Plugin.Models.TwPermissionDisposition>> GetAllPermissionDispositions()
+        {
+            var cacheKey = MemCacheKeyFunction.Build(MemCache.Category.Security);
+
+            return (await MemCache.AddOrGetAsync(cacheKey, async () =>
+            {
+                using var context = _createContext();
+
+                return await context.PermissionDispositions
+                    .OrderBy(pd => pd.Name)
+                    .Select(pd => new TightWiki.Plugin.Models.TwPermissionDisposition
+                    {
+                        Id = pd.Id,
+                        Name = pd.Name,
+                    })
+                    .ToListAsync();
+            })).EnsureNotNull();
+        }
+
+        /// <summary>
+        /// Mirrors GetAllPermissions.sql: every Users.Permission row (the fixed "Read"/"Edit"/"Delete"/"Moderate"/
+        /// "Create" set), ordered by Name. Cached under <see cref="MemCache.Category.Security"/>, same cache key
+        /// shape (no extra segments) as the reference.
+        /// </summary>
+        public async Task<List<TightWiki.Plugin.Models.TwPermission>> GetAllPermissions()
+        {
+            var cacheKey = MemCacheKeyFunction.Build(MemCache.Category.Security);
+
+            return (await MemCache.AddOrGetAsync(cacheKey, async () =>
+            {
+                using var context = _createContext();
+
+                return await context.Permissions
+                    .OrderBy(p => p.Name)
+                    .Select(p => new TightWiki.Plugin.Models.TwPermission
+                    {
+                        Id = p.Id,
+                        Name = p.Name,
+                    })
+                    .ToListAsync();
+            })).EnsureNotNull();
+        }
+
+        /// <summary>
+        /// Mirrors GetRolePermissionsPaged.sql: every Users.RolePermission row for <paramref name="roleId"/>, each
+        /// joined to its Permission/PermissionDisposition names and a computed ResourceName (see <see
+        /// cref="ComputeResourceName"/>). <see cref="TwRolePermission.PaginationPageSize"/>/<see
+        /// cref="TwRolePermission.PaginationPageCount"/> are computed from <paramref name="pageSize"/> if supplied,
+        /// else the "Pagination Size" customization setting - same <c>pageSize ??= ...</c> precedence as the
+        /// reference's own C# wrapper (contrast <see cref="GetRoleMembersPaged"/>, which always ignores its
+        /// <paramref name="pageSize"/> argument). Because ordering by "Resource" needs the same namespace/page-id
+        /// precedence and Pages.Page.Name lookup as <see cref="ComputeResourceName"/> (and the reference script's
+        /// own <c>--CONFIG::</c> "Resource" mapping computes an <c>'N-'</c>/<c>'P-'</c>-prefixed sort key over
+        /// exactly that same LEFT OUTER JOIN, see <see cref="ComputeResourceSortKey"/>), the (typically small) set
+        /// of a role's permissions is pulled into memory first - same "paginate/sort in memory" approach as <see
+        /// cref="GetRoleMembersPaged"/>, but here because of the computed sort key rather than a second
+        /// <see cref="ApplicationDbContext"/>. Default ordering mirrors the script's own un-transposed <c>ORDER BY
+        /// P.Name, PD.Name</c> (both ascending); an unrecognized <paramref name="orderBy"/> throws, same pattern as
+        /// <see cref="GetAllRoles"/>. String comparisons/sorts use <see cref="StringComparer.Ordinal"/>, same
+        /// reasoning as <see cref="GetRoleMembersPaged"/>.
+        /// </summary>
+        public async Task<List<TwRolePermission>> GetRolePermissionsPaged(int roleId, int pageNumber, string? orderBy = null, string? orderByDirection = null, int? pageSize = null)
+        {
+            pageSize ??= await _configurationRepository.Get<int>(TwConfigGroup.Customization, "Pagination Size");
+            var effectivePageSize = pageSize.Value;
+
+            using var context = _createContext();
+
+            var rows = await context.RolePermissions
+                .Where(rp => rp.RoleId == roleId)
+                .Select(rp => new
+                {
+                    rp.Id,
+                    Permission = rp.Permission.Name,
+                    PermissionDisposition = rp.PermissionDisposition.Name,
+                    rp.Namespace,
+                    rp.PageId,
+                })
+                .ToListAsync();
+
+            var pageNamesById = await ResolvePageNamesAsync(context, rows.Select(r => (r.Namespace, r.PageId)));
+
+            var totalCount = rows.Count;
+            var paginationPageCount = (totalCount + (effectivePageSize - 1)) / effectivePageSize;
+
+            var permissions = rows.Select(r => new TwRolePermission
+            {
+                Id = r.Id,
+                Permission = r.Permission,
+                PermissionDisposition = r.PermissionDisposition,
+                Namespace = r.Namespace,
+                PageId = r.PageId,
+                ResourceName = ComputeResourceName(r.Namespace, r.PageId, pageNamesById),
+                PaginationPageSize = effectivePageSize,
+                PaginationPageCount = paginationPageCount,
+            }).ToList();
+
+            bool ascending = string.Equals(orderByDirection, "asc", StringComparison.InvariantCultureIgnoreCase);
+
+            IOrderedEnumerable<TwRolePermission> ordered = string.IsNullOrEmpty(orderBy)
+                ? permissions.OrderBy(x => x.Permission, StringComparer.Ordinal).ThenBy(x => x.PermissionDisposition, StringComparer.Ordinal)
+                : orderBy.ToUpperInvariant() switch
+                {
+                    "PERMISSION" => ascending
+                        ? permissions.OrderBy(x => x.Permission, StringComparer.Ordinal)
+                        : permissions.OrderByDescending(x => x.Permission, StringComparer.Ordinal),
+                    "DISPOSITION" => ascending
+                        ? permissions.OrderBy(x => x.PermissionDisposition, StringComparer.Ordinal)
+                        : permissions.OrderByDescending(x => x.PermissionDisposition, StringComparer.Ordinal),
+                    "RESOURCE" => ascending
+                        ? permissions.OrderBy(x => ComputeResourceSortKey(x.Namespace, x.PageId, pageNamesById), StringComparer.Ordinal)
+                        : permissions.OrderByDescending(x => ComputeResourceSortKey(x.Namespace, x.PageId, pageNamesById), StringComparer.Ordinal),
+                    _ => throw new InvalidOperationException($"No order by mapping was found in 'GetRolePermissionsPaged.sql' for the field '{orderBy}'."),
+                };
+
+            return ordered
+                .Skip((pageNumber - 1) * effectivePageSize)
+                .Take(effectivePageSize)
+                .ToList();
+        }
+
+        /// <summary>
+        /// Shared by <see cref="GetRolePermissionsPaged"/>/<see cref="GetAccountPermissionsPaged"/>: batch-resolves
+        /// Pages.Page.Name for every namespace-less, non-wildcard, numeric <c>PageId</c> among <paramref
+        /// name="scopes"/> in a single query (<c>Contains(...)</c>-based - same "temp-table join replaced by a
+        /// single <c>Contains</c> query" idiom as <see cref="EfPageRepository"/>'s <c>TempPageIds</c> pattern, see
+        /// that project's remarks), rather than one query per row.
+        /// </summary>
+        private static async Task<Dictionary<int, string>> ResolvePageNamesAsync(TightWikiDbContext context, IEnumerable<(string? Namespace, string? PageId)> scopes)
+        {
+            var pageIds = scopes
+                .Where(s => s.Namespace == null && s.PageId != null && s.PageId != "*")
+                .Select(s => int.TryParse(s.PageId, out var parsed) ? (int?)parsed : null)
+                .Where(id => id.HasValue)
+                .Select(id => id!.Value)
+                .Distinct()
+                .ToList();
+
+            if (pageIds.Count == 0)
+            {
+                return [];
+            }
+
+            return await context.Pages_Pages
+                .Where(p => pageIds.Contains(p.Id))
+                .ToDictionaryAsync(p => p.Id, p => p.Name);
+        }
 
         public Task<List<TwAccountProfile>> GetAllPublicProfilesPaged(int pageNumber, int? pageSize = null, string? searchToken = null)
             => throw new NotImplementedException();
@@ -575,11 +1089,156 @@ namespace TightWiki.Data.EfCore.Repositories
                 .ToList();
         }
 
-        public Task<List<TwAccountPermission>> GetAccountPermissionsPaged(Guid userId, int pageNumber, string? orderBy = null, string? orderByDirection = null, int? pageSize = null)
-            => throw new NotImplementedException();
+        /// <summary>
+        /// Mirrors GetAccountPermissionsPaged.sql: same shape and sort/page-in-memory approach as <see
+        /// cref="GetRolePermissionsPaged"/> (see that member's remarks), scoped to <paramref name="userId"/>'s
+        /// direct Users.AccountPermission rows instead of a role's Users.RolePermission rows.
+        /// </summary>
+        public async Task<List<TwAccountPermission>> GetAccountPermissionsPaged(Guid userId, int pageNumber, string? orderBy = null, string? orderByDirection = null, int? pageSize = null)
+        {
+            pageSize ??= await _configurationRepository.Get<int>(TwConfigGroup.Customization, "Pagination Size");
+            var effectivePageSize = pageSize.Value;
 
-        public Task<List<TwAccountRoleMembership>> GetAccountRoleMembershipPaged(Guid userId, int pageNumber, string? orderBy = null, string? orderByDirection = null, int? pageSize = null)
-            => throw new NotImplementedException();
+            using var context = _createContext();
+
+            var rows = await context.AccountPermissions
+                .Where(ap => ap.UserId == userId)
+                .Select(ap => new
+                {
+                    ap.Id,
+                    Permission = ap.Permission.Name,
+                    PermissionDisposition = ap.PermissionDisposition.Name,
+                    ap.Namespace,
+                    ap.PageId,
+                })
+                .ToListAsync();
+
+            var pageNamesById = await ResolvePageNamesAsync(context, rows.Select(r => (r.Namespace, r.PageId)));
+
+            var totalCount = rows.Count;
+            var paginationPageCount = (totalCount + (effectivePageSize - 1)) / effectivePageSize;
+
+            var permissions = rows.Select(r => new TwAccountPermission
+            {
+                Id = r.Id,
+                Permission = r.Permission,
+                PermissionDisposition = r.PermissionDisposition,
+                Namespace = r.Namespace,
+                PageId = r.PageId,
+                ResourceName = ComputeResourceName(r.Namespace, r.PageId, pageNamesById),
+                PaginationPageSize = effectivePageSize,
+                PaginationPageCount = paginationPageCount,
+            }).ToList();
+
+            bool ascending = string.Equals(orderByDirection, "asc", StringComparison.InvariantCultureIgnoreCase);
+
+            IOrderedEnumerable<TwAccountPermission> ordered = string.IsNullOrEmpty(orderBy)
+                ? permissions.OrderBy(x => x.Permission, StringComparer.Ordinal).ThenBy(x => x.PermissionDisposition, StringComparer.Ordinal)
+                : orderBy.ToUpperInvariant() switch
+                {
+                    "PERMISSION" => ascending
+                        ? permissions.OrderBy(x => x.Permission, StringComparer.Ordinal)
+                        : permissions.OrderByDescending(x => x.Permission, StringComparer.Ordinal),
+                    "DISPOSITION" => ascending
+                        ? permissions.OrderBy(x => x.PermissionDisposition, StringComparer.Ordinal)
+                        : permissions.OrderByDescending(x => x.PermissionDisposition, StringComparer.Ordinal),
+                    "RESOURCE" => ascending
+                        ? permissions.OrderBy(x => ComputeResourceSortKey(x.Namespace, x.PageId, pageNamesById), StringComparer.Ordinal)
+                        : permissions.OrderByDescending(x => ComputeResourceSortKey(x.Namespace, x.PageId, pageNamesById), StringComparer.Ordinal),
+                    _ => throw new InvalidOperationException($"No order by mapping was found in 'GetAccountPermissionsPaged.sql' for the field '{orderBy}'."),
+                };
+
+            return ordered
+                .Skip((pageNumber - 1) * effectivePageSize)
+                .Take(effectivePageSize)
+                .ToList();
+        }
+
+        /// <summary>
+        /// Mirrors GetAccountRoleMembershipPaged.sql: every Users.AccountRole row for <paramref name="userId"/>,
+        /// joined to its Role.Name - but only when both a Users.Profile row and a matching Identity (AspNetUsers)
+        /// row exist for <paramref name="userId"/> (the reference's own <c>INNER JOIN Profile</c>/<c>INNER JOIN
+        /// AspNetUsers</c>, existence-only - no Profile/Identity column is ever selected). The Identity check
+        /// requires the separate <see cref="ApplicationDbContext"/>, same two-context split as <see
+        /// cref="GetRoleMembersPaged"/>. <see cref="TwAccountRoleMembership.PaginationPageSize"/>/<see
+        /// cref="TwAccountRoleMembership.PaginationPageCount"/> always come from the "Pagination Size"
+        /// customization setting, ignoring <paramref name="pageSize"/> - same quirk, and same reasoning for not
+        /// reproducing the reference's own <c>PaginationPageCount</c> subquery's additional <c>INNER JOIN
+        /// AspNetUsers</c>, as <see cref="GetRoleMembersPaged"/> already documents.
+        /// </summary>
+        /// <remarks>
+        /// The reference script's own custom <c>--CONFIG::</c> "OrderBy" mapping (EmailAddress/AccountName/
+        /// LastName/FirstName) sorts by columns that - because this method is always scoped to the single
+        /// <paramref name="userId"/> passed in - hold the exact same value on every returned row; sorting by a
+        /// constant is a no-op (a stable sort leaves relative row order unchanged), so which of those four keys is
+        /// requested has no observable effect on the returned order under either the reference or here. This still
+        /// validates <paramref name="orderBy"/> against that same four-key set and throws for anything else,
+        /// matching the reference script's own behavior for an unrecognized key - including the one caller,
+        /// <c>AdminSecurityController.AccountRoles</c>, which (confirmed by inspection) actually reads the query
+        /// string key <c>OrderBy_Members</c> while the corresponding column header link
+        /// (<c>AccountRoles.cshtml</c>) generates <c>OrderBy_Memberships</c> - a pre-existing key-name mismatch
+        /// that means <paramref name="orderBy"/> is always <see langword="null"/> in practice from that caller, out
+        /// of scope to fix here. Rows are otherwise returned ordered by <see cref="TwAccountRoleMembership.Id"/>
+        /// ascending for determinism, mirroring the reference script's own default <c>ORDER BY U.AccountName,
+        /// U.UserId</c> (also both constant per-user, hence also effectively a no-op).
+        /// </remarks>
+        public async Task<List<TwAccountRoleMembership>> GetAccountRoleMembershipPaged(Guid userId, int pageNumber, string? orderBy = null, string? orderByDirection = null, int? pageSize = null)
+        {
+            var paginationSize = await _configurationRepository.Get<int>(TwConfigGroup.Customization, "Pagination Size");
+
+            if (!string.IsNullOrEmpty(orderBy))
+            {
+                switch (orderBy.ToUpperInvariant())
+                {
+                    case "EMAILADDRESS":
+                    case "ACCOUNTNAME":
+                    case "LASTNAME":
+                    case "FIRSTNAME":
+                        break;
+                    default:
+                        throw new InvalidOperationException($"No order by mapping was found in 'GetAccountRoleMembershipPaged.sql' for the field '{orderBy}'.");
+                }
+            }
+
+            using var context = _createContext();
+
+            if (!await context.Profiles.AnyAsync(p => p.UserId == userId))
+            {
+                return [];
+            }
+
+            using var identityContext = _createIdentityContext();
+            var identityUserId = userId.ToString();
+            if (!await identityContext.Users.AnyAsync(u => u.Id == identityUserId))
+            {
+                return [];
+            }
+
+            var memberships = await context.AccountRoles
+                .Where(ar => ar.UserId == userId)
+                .OrderBy(ar => ar.Id)
+                .Select(ar => new TwAccountRoleMembership
+                {
+                    Id = ar.Id,
+                    Name = ar.Role.Name,
+                    RoleId = ar.RoleId,
+                })
+                .ToListAsync();
+
+            var totalCount = memberships.Count;
+            var paginationPageCount = (totalCount + (paginationSize - 1)) / paginationSize;
+
+            foreach (var membership in memberships)
+            {
+                membership.PaginationPageSize = paginationSize;
+                membership.PaginationPageCount = paginationPageCount;
+            }
+
+            return memberships
+                .Skip((pageNumber - 1) * paginationSize)
+                .Take(paginationSize)
+                .ToList();
+        }
 
         public Task<List<TwAccountProfile>> GetAllUsers()
             => throw new NotImplementedException();
