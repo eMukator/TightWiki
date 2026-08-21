@@ -89,7 +89,10 @@ namespace TightWiki
                     TwDefaultDataType.Configurations,
                     TwDefaultDataType.FeatureTemplates,
                     TwDefaultDataType.HelpPages,
-                    TwDefaultDataType.BuiltinPages]);
+                    TwDefaultDataType.BuiltinPages,
+                    TwDefaultDataType.IncludePages,
+                    TwDefaultDataType.RootPages,
+                    TwDefaultDataType.SandboxPages]);
             }
 #endif
 
@@ -448,6 +451,9 @@ namespace TightWiki
                             TwDefaultDataType.HelpPages,
 #if SQLSERVER_PROVIDER || POSTGRES_PROVIDER
                             TwDefaultDataType.BuiltinPages,
+                            TwDefaultDataType.IncludePages,
+                            TwDefaultDataType.RootPages,
+                            TwDefaultDataType.SandboxPages,
 #endif
                             ]);
 

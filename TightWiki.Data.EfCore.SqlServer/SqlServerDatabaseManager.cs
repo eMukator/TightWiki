@@ -7,6 +7,7 @@ using System.Data.Common;
 using TightWiki.Data.EfCore.Repositories;
 using TightWiki.Data.EfCore.Seeding;
 using TightWiki.Library;
+using TightWiki.Library.Security;
 using TightWiki.Plugin;
 using TightWiki.Plugin.Interfaces;
 using TightWiki.Plugin.Interfaces.Repository;
@@ -227,7 +228,7 @@ namespace TightWiki.Data.EfCore.SqlServer
                 await EnsureAdminUser(context, userManager);
             }
 
-            await SeedContentDataAsync(defaultDataTypes);
+            await SeedContentDataAsync(defaultDataTypes, tightEngine, localizer);
         }
 
         /// <summary>
@@ -266,7 +267,7 @@ namespace TightWiki.Data.EfCore.SqlServer
         /// method's idempotency (see <see cref="ApplyAllSeedData"/>'s remarks).
         /// </para>
         /// </remarks>
-        public async Task SeedContentDataAsync(TwDefaultDataType[] defaultDataTypes)
+        public async Task SeedContentDataAsync(TwDefaultDataType[] defaultDataTypes, ITwEngine? tightEngine = null, ITwSharedLocalizationText? localizer = null)
         {
             using var context = CreateDbContext();
 
@@ -287,10 +288,12 @@ namespace TightWiki.Data.EfCore.SqlServer
                 if (defaultDataTypes.Contains(TwDefaultDataType.HelpPages)) namespaces.Add("Wiki Help");
                 if (defaultDataTypes.Contains(TwDefaultDataType.IncludePages)) namespaces.Add("Include");
                 if (defaultDataTypes.Contains(TwDefaultDataType.BuiltinPages)) namespaces.Add("Builtin");
+                if (defaultDataTypes.Contains(TwDefaultDataType.RootPages)) namespaces.Add("");
+                if (defaultDataTypes.Contains(TwDefaultDataType.SandboxPages)) namespaces.Add("Sandbox");
 
                 if (namespaces.Count > 0)
                 {
-                    await SeedWikiPages(context, namespaces, adminProfile.UserId);
+                    await SeedWikiPages(context, namespaces, adminProfile.UserId, tightEngine, localizer);
                 }
             }
 
@@ -502,14 +505,27 @@ namespace TightWiki.Data.EfCore.SqlServer
         }
 
         /// <summary>
-        /// Seeds Pages.Page + Pages.PageRevision (revision 1 only - no markup processing/tokenization/tagging,
-        /// see <see cref="ApplyAllSeedData"/>'s remarks on why <see cref="PageRepository"/> is not used) for the
-        /// given default-wiki-page namespaces. Existing pages (matched by
-        /// <see cref="Entities.Pages.Page.Navigation"/>) have their current revision's content overwritten in
-        /// place rather than being duplicated or revision-bumped, mirroring the SQLite reference passing the
-        /// existing page's Id into <c>UpsertPage</c> when one is found.
+        /// Seeds Pages.Page + Pages.PageRevision (revision 1 only) for the given default-wiki-page namespaces.
+        /// Existing pages (matched by <see cref="Entities.Pages.Page.Navigation"/>) have their current revision's
+        /// content overwritten in place rather than being duplicated or revision-bumped, mirroring the SQLite
+        /// reference passing the existing page's Id into <c>UpsertPage</c> when one is found. Raw content only -
+        /// derived search/tag/reference metadata is a separate pass, see the <paramref name="tightEngine"/>/
+        /// <paramref name="localizer"/> remarks below.
         /// </summary>
-        private async Task SeedWikiPages(TightWikiDbContext context, List<string> namespaces, Guid adminUserId)
+        /// <param name="tightEngine">
+        /// When non-null (the post-<c>Build()</c> <see cref="ApplyAllSeedData"/> call, which is the only one that
+        /// ever reaches here - see <see cref="SeedContentDataAsync"/>'s remarks on why the pre-<c>Build()</c> call
+        /// never seeds wiki pages at all), every page this call touches (inserted or updated) is immediately run
+        /// through <see cref="PageRepository"/>'s own <see cref="EfPageRepository.RefreshPageMetadata"/> - the same
+        /// method <see cref="EfPageRepository.UpsertPage"/> itself calls - to populate Pages.PageTag/
+        /// PageProcessingInstruction/PageToken/PageReference from the page's <c>Body</c>. Without this, search
+        /// (which reads PageToken), tag listings, and backlinks would be empty for every seeded page even though
+        /// the pages themselves render fine - the raw insert above intentionally skips this (mirroring
+        /// <c>UpsertPage</c>'s own two-step "save, then refresh metadata" split), so it has to happen here instead.
+        /// Null on any call that lacks a built DI container to resolve <see cref="ITwEngine"/> from.
+        /// </param>
+        private async Task SeedWikiPages(TightWikiDbContext context, List<string> namespaces, Guid adminUserId,
+            ITwEngine? tightEngine, ITwSharedLocalizationText? localizer)
         {
             var defaultPages = new List<TwDefaultWikiPage>();
             foreach (var namespaceName in namespaces)
@@ -573,6 +589,121 @@ namespace TightWiki.Data.EfCore.SqlServer
                     });
 
                     existingPages[defaultPage.Navigation] = newPage;
+                }
+            }
+
+            await context.SaveChangesAsync();
+
+            if (tightEngine != null && localizer != null)
+            {
+                foreach (var defaultPage in defaultPages)
+                {
+                    var seededPage = existingPages[defaultPage.Navigation];
+                    var page = new TwPage
+                    {
+                        Id = seededPage.Id,
+                        Name = defaultPage.Name,
+                        Navigation = defaultPage.Navigation,
+                        Description = defaultPage.Description,
+                        Body = defaultPage.Body,
+                        Revision = 1,
+                        MostCurrentRevision = 1,
+                        CreatedByUserId = adminUserId,
+                        CreatedDate = now,
+                        ModifiedByUserId = adminUserId,
+                        ModifiedDate = now,
+                    };
+                    await PageRepository.RefreshPageMetadata(tightEngine, localizer, page);
+                }
+            }
+
+            await SeedPageFileAttachments(context, namespaces, existingPages.Values, adminUserId);
+        }
+
+        /// <summary>
+        /// Seeds Pages.PageFile + Pages.PageFileRevision + Pages.PageRevisionAttachment (revision 1 only, matching
+        /// <see cref="SeedWikiPages"/>'s own single-revision seeding) for whatever pages <see cref="SeedWikiPages"/>
+        /// just seeded in <paramref name="namespaces"/> - e.g. the image embedded in the Home/Wiki About page
+        /// bodies. Existing attachments (matched by (PageId, Navigation)) have their current revision's content
+        /// overwritten in place, mirroring <see cref="SeedWikiPages"/>'s own update-in-place behavior for existing
+        /// pages rather than duplicating/revision-bumping. An attachment whose page isn't in
+        /// <paramref name="seededPages"/> (page namespace wasn't requested) is silently skipped, same tolerance as
+        /// <see cref="SeedFeatureTemplates"/>'s unresolved <c>PageName</c> handling.
+        /// </summary>
+        private async Task SeedPageFileAttachments(TightWikiDbContext context, List<string> namespaces, IEnumerable<PagesEntities.Page> seededPages, Guid adminUserId)
+        {
+            var defaultAttachments = new List<TwDefaultPageFileAttachment>();
+            foreach (var namespaceName in namespaces)
+            {
+                defaultAttachments.AddRange(await DefaultsRepository.GetDefaultPageFileAttachments(namespaceName));
+            }
+
+            if (defaultAttachments.Count == 0)
+            {
+                return;
+            }
+
+            var pageIdsByKey = seededPages.ToDictionary(p => $"{p.Name} {p.Namespace}", p => p.Id, StringComparer.OrdinalIgnoreCase);
+            var existingFiles = await context.Pages_PageFiles.ToDictionaryAsync(f => $"{f.PageId} {f.Navigation}", StringComparer.OrdinalIgnoreCase);
+            var now = DateTime.UtcNow;
+
+            foreach (var defaultAttachment in defaultAttachments)
+            {
+                if (!pageIdsByKey.TryGetValue($"{defaultAttachment.PageName} {defaultAttachment.Namespace}", out var pageId))
+                {
+                    continue;
+                }
+
+                var dataHash = SecurityUtility.Crc32(defaultAttachment.Data);
+                var fileKey = $"{pageId} {defaultAttachment.FileNavigation}";
+
+                if (existingFiles.TryGetValue(fileKey, out var existingFile))
+                {
+                    var existingRevision = await context.Pages_PageFileRevisions.FindAsync(existingFile.Id, existingFile.Revision);
+                    if (existingRevision != null)
+                    {
+                        existingRevision.ContentType = defaultAttachment.ContentType;
+                        existingRevision.Size = defaultAttachment.Data.Length;
+                        existingRevision.Data = defaultAttachment.Data;
+                        existingRevision.DataHash = dataHash;
+                        existingRevision.CreatedByUserId = adminUserId;
+                        existingRevision.CreatedDate = now;
+                    }
+                }
+                else
+                {
+                    var newFile = new PagesEntities.PageFile
+                    {
+                        PageId = pageId,
+                        Name = defaultAttachment.FileName,
+                        Navigation = defaultAttachment.FileNavigation,
+                        Revision = 1,
+                        CreatedDate = now,
+                    };
+                    context.Pages_PageFiles.Add(newFile);
+                    await context.SaveChangesAsync(); //Need the generated Id - PageFileRevision.PageFileId is not a navigation.
+
+                    context.Pages_PageFileRevisions.Add(new PagesEntities.PageFileRevision
+                    {
+                        PageFileId = newFile.Id,
+                        ContentType = defaultAttachment.ContentType,
+                        Size = defaultAttachment.Data.Length,
+                        CreatedByUserId = adminUserId,
+                        CreatedDate = now,
+                        Data = defaultAttachment.Data,
+                        Revision = 1,
+                        DataHash = dataHash,
+                    });
+
+                    context.Pages_PageRevisionAttachments.Add(new PagesEntities.PageRevisionAttachment
+                    {
+                        PageId = pageId,
+                        PageFileId = newFile.Id,
+                        FileRevision = 1,
+                        PageRevision = 1,
+                    });
+
+                    existingFiles[fileKey] = newFile;
                 }
             }
 

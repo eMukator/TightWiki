@@ -18,8 +18,6 @@ INNER JOIN (
 			Page as P
 		INNER JOIN PageRevision as PR
 			ON P.Id = PR.PageId
-		WHERE
-			PR.Namespace IN ('Builtin', 'Include', 'Wiki Help')
 		GROUP BY
 			P.Id
 	) as MaxRevisions

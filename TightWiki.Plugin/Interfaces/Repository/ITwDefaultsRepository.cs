@@ -34,6 +34,13 @@ namespace TightWiki.Plugin.Interfaces.Repository
         Task<List<TwDefaultFeatureTemplate>> GetDefaultFeatureTemplates();
 
         /// <summary>
+        /// Returns all default page file attachments (e.g. images embedded in a default page's body) belonging to
+        /// the specified namespace, used to seed the database. As with <see cref="GetDefaultEmojis"/>, the SQLite
+        /// provider returns an empty collection - it gets these "for free" via a full copy of Data\pages.db.
+        /// </summary>
+        Task<List<TwDefaultPageFileAttachment>> GetDefaultPageFileAttachments(string namespaceName);
+
+        /// <summary>
         /// Returns all default emoji (metadata only - no image bytes; see <see cref="TwDefaultEmoji.ImageEntry"/>)
         /// used to seed the database. The SQLite provider does not seed emoji through this mechanism (it gets them
         /// "for free" via a full copy of Data\emoji.db) and therefore returns an empty collection; this method

@@ -113,6 +113,22 @@ namespace TightWiki.Data.EfCore.Seeding
             => ReadJsonEntryAsync<List<TwDefaultFeatureTemplate>>("FeatureTemplate.json");
 
         /// <inheritdoc/>
+        public async Task<List<TwDefaultPageFileAttachment>> GetDefaultPageFileAttachments(string namespaceName)
+        {
+            var entryName = $"DefaultPageFileAttachments/{namespaceName}.json";
+            var entry = Archive.GetEntry(entryName);
+            if (entry == null)
+            {
+                //Mirrors GetDefaultWikiPages's "no matching namespace" handling - an empty result, not an error.
+                return [];
+            }
+
+            await using var stream = entry.Open();
+            var result = await JsonSerializer.DeserializeAsync<List<TwDefaultPageFileAttachment>>(stream, JsonOptions);
+            return result ?? [];
+        }
+
+        /// <inheritdoc/>
         public Task<List<TwDefaultEmoji>> GetDefaultEmojis()
             => ReadJsonEntryAsync<List<TwDefaultEmoji>>("Emoji.json");
 

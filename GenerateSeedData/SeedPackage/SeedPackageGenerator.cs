@@ -20,9 +20,11 @@ namespace GenerateSeedData.SeedPackage
     ///   MenuItem.json                     - config.db MenuItem, raw dump
     ///   Theme.json                        - config.db Theme, raw dump
     ///   FeatureTemplate.json              - pages.db FeatureTemplate joined to Page.Name (PageId is not portable)
-    ///   DefaultWikiPages/&lt;Namespace&gt;.json - pages.db Page+PageRevision, one file per namespace (Builtin,
-    ///                                      Include, Wiki Help), matching the future
-    ///                                      ITwDefaultsRepository.GetDefaultWikiPages(namespace) signature
+    ///   DefaultWikiPages/&lt;Namespace&gt;.json - pages.db Page+PageRevision, one file per namespace actually present
+    ///                                      in pages.db (Builtin, Include, Sandbox, Wiki Help, and the default/root
+    ///                                      "" namespace - the empty string namespace file is named "".json),
+    ///                                      matching the ITwDefaultsRepository.GetDefaultWikiPages(namespace)
+    ///                                      signature
     ///   Emoji.json                        - emoji.db Emoji metadata (Id, Name, MimeType) + a reference to the
     ///                                      corresponding Emoji/Images/* zip entry - no base64, see below
     ///   EmojiCategory.json                - emoji.db EmojiCategory, raw dump
@@ -71,6 +73,18 @@ namespace GenerateSeedData.SeedPackage
             foreach (var namespaceGroup in wikiPages.GroupBy(p => p.Namespace).OrderBy(g => g.Key))
             {
                 string entryName = $"DefaultWikiPages/{namespaceGroup.Key}.json";
+                Console.WriteLine($"  Adding: {entryName}");
+                WriteJsonEntry(archive, entryName, namespaceGroup.ToList());
+            }
+
+            //Images/files attached to default wiki pages (e.g. the "MC Music.png" on Home, the logo on Wiki
+            //About). Raw bytes are embedded as base64 directly in the JSON manifest - unlike Emoji/Images/* below,
+            //the total volume here is a few hundred KB (not ~18 MB), so a separate binary zip entry per file
+            //would be needless ceremony.
+            var pageFileAttachments = pagesDb.Query<TwDefaultPageFileAttachment>(@"Scripts\GetDefaultPageFileAttachments.sql");
+            foreach (var namespaceGroup in pageFileAttachments.GroupBy(a => a.Namespace).OrderBy(g => g.Key))
+            {
+                string entryName = $"DefaultPageFileAttachments/{namespaceGroup.Key}.json";
                 Console.WriteLine($"  Adding: {entryName}");
                 WriteJsonEntry(archive, entryName, namespaceGroup.ToList());
             }
