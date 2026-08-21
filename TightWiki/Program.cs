@@ -61,13 +61,27 @@ namespace TightWiki
             //comment on SqlServerDatabaseManager for how this call and the later, post-Build ApplyAllSeedData
             //call (below, inside app.Services.CreateScope()) divide the seeding work between them. Same
             //wasDatabaseUpgraded gate as that later call.
+            //BuiltinPages ("Wiki Page Does Not Exist"/"Wiki Page Revision Does Not Exist"/etc. - see
+            //TwDefaultDataType.BuiltinPages's own doc comment, "Core built-in wiki pages") is included here (and
+            //in the later, post-Build ApplyAllSeedData call below) only for the SQL Server build. SQLite needs no
+            //equivalent: those pages already exist unconditionally the moment DatabaseManager.CreateDefaultsDatabase
+            //copies the shipped, pre-populated Data\pages.db file - this selective, TwDefaultDataType-gated reseed
+            //is only ever a redundant, idempotent no-op refresh for SQLite (matched by navigation, see
+            //DatabaseManager.ApplyAllSeedData), never how those pages get there in the first place. MSSQL has no
+            //such file-copy shortcut (SqlServerDatabaseManager.SeedContentDataAsync's own doc comment), so without
+            //this flag the fallback configured pages ("Page Not Exists Page"/"Revision Does Not Exists
+            //Page") never get seeded at all, and every navigation to a nonexistent page - including the very
+            //first request to the home page on a brand new install - throws an unhandled exception
+            //(PageController.Display's .EnsureNotNull() on a null GetPageRevisionByNavigation result). Confirmed
+            //live against SQL Server LocalDB.
             if (wasDatabaseUpgraded)
             {
                 await ((SqlServerDatabaseManager)databaseManager).SeedContentDataAsync(
                     [TwDefaultDataType.Themes,
                     TwDefaultDataType.Configurations,
                     TwDefaultDataType.FeatureTemplates,
-                    TwDefaultDataType.HelpPages]);
+                    TwDefaultDataType.HelpPages,
+                    TwDefaultDataType.BuiltinPages]);
             }
 #endif
 
@@ -398,11 +412,20 @@ namespace TightWiki
                 {
                     try
                     {
+                        //See the matching comment on the earlier, pre-Build SeedContentDataAsync call
+                        //(#if SQLSERVER_PROVIDER, above) for why TwDefaultDataType.BuiltinPages is added only for
+                        //the SQL Server build here and left untouched (so genuinely 0-diff) for SQLite - this is
+                        //the call that actually performs the seed (the earlier one is always a no-op for wiki
+                        //pages specifically, since no admin Users.Profile row exists yet at that point).
                         await databaseManager.ApplyAllSeedData(new TwVerbatimLocalizationText(), userManager, tightEngine,
                             [TwDefaultDataType.Themes,
                             TwDefaultDataType.Configurations,
                             TwDefaultDataType.FeatureTemplates,
-                            TwDefaultDataType.HelpPages]);
+                            TwDefaultDataType.HelpPages,
+#if SQLSERVER_PROVIDER
+                            TwDefaultDataType.BuiltinPages,
+#endif
+                            ]);
 
                         await wikiConfigurationManager.ReloadAll();
                     }
