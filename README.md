@@ -140,19 +140,32 @@ that implicitly falls back to the default `Sqlite`) against a stale restore for 
 confusing `CS0246: The type or namespace name 'Dapper' could not be found` (or a similar `NTDLS.SqliteDapperWrapper`
 error) — that's not a code bug, just an out-of-date `project.assets.json` from the previous restore.
 
-### Debugging in Visual Studio (F5)
+### Visual Studio Solution Configurations (Debug/Release per provider)
 
-`DataProvider` is also read from an environment variable, so you can switch providers without touching any
-project file: set `DataProvider=SqlServer` (or `Postgres`) before Visual Studio starts — either `$env:DataProvider
-= "SqlServer"` in the PowerShell session you launch `devenv .\TightWiki.sln` from, or persistently via
-`setx DataProvider SqlServer` / Control Panel → Environment Variables. Either way, **fully close and restart
-Visual Studio** afterwards — reloading the project in an already-running instance won't pick up the new
-environment variable. Don't use `TightWiki.csproj.user` for this: it's imported after the conditional
-`PropertyGroup`/`ItemGroup` blocks above are evaluated, so `DefineConstants` stays stuck on `SQLITE_PROVIDER`
-while the `ProjectReference`/`PackageReference` switch correctly, an inconsistent state that fails to build.
-Once restarted with the new environment variable, do a Rebuild Solution / Restore NuGet Packages — same restore
-gotcha as above. For SQL Server via LocalDB, `TightWiki/appsettings.Development.json` already ships a working
-`ConnectionStrings:TightWikiEfCore` value, so no further configuration is needed to hit F5.
+`TightWiki.csproj` declares six Solution Configurations — the normal `Debug`/`Release` (which stay `Sqlite`)
+plus a Debug and a Release variant per EF Core provider:
+
+| Configuration       | `DataProvider` | Debug symbols |
+|----------------------|----------------|---------------|
+| `Debug`               | `Sqlite`       | on            |
+| `Release`              | `Sqlite`       | off           |
+| `Debug-SqlServer`      | `SqlServer`    | on            |
+| `Release-SqlServer`    | `SqlServer`    | off           |
+| `Debug-Postgres`       | `Postgres`     | on            |
+| `Release-Postgres`     | `Postgres`     | off           |
+
+Each `Release-*` variant carries the same `DebugSymbols`/`DebugType` settings as plain `Release` — it's a real
+Release build (no debug symbols), just targeting SQL Server/Postgres instead of SQLite; it isn't only a Debug-time
+convenience. Pick any of the six from the Configuration dropdown in the toolbar (or Build → Configuration
+Manager) exactly like you would Debug/Release today — no environment variable, no `.csproj.user`, no
+closing/reopening Visual Studio; switching the dropdown re-evaluates every project the same way any other
+configuration change would. Do a Rebuild Solution after switching — same restore gotcha as above, since NuGet
+resolves the SQLite/EF-Core-driver project reference at restore time. For SQL Server via LocalDB,
+`appsettings.Development.json` already ships a working `ConnectionStrings:TightWikiEfCore` value, so no further
+configuration is needed to hit F5 after picking `Debug-SqlServer`.
+
+An explicit `-p:DataProvider=...` (or the `DataProvider` OS environment variable, for CI/non-VS setups) still
+overrides the Configuration mapping if both are present — see `TightWiki/TightWiki.csproj`.
 
 ### Connection strings
 
