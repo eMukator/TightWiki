@@ -2226,6 +2226,83 @@ namespace TightWiki.Data.EfCore.Repositories
                 {
                     await SetProfileUserId(Constants.DEFAULTACCOUNT, Guid.Parse(user.Id));
                 }
+
+                await EnsureAdministratorRoleMembership(Guid.Parse(user.Id));
+            }
+        }
+
+        /// <summary>
+        /// Grants <paramref name="userId"/> membership in the built-in "Administrator" Users.Role via a
+        /// Users.AccountRole row - called once, at the end of <see cref="ValidateEncryptionAndCreateAdminUserAsync"/>,
+        /// right after that method ensures the admin's Users.Profile row exists (a prerequisite: see <see
+        /// cref="Configurations.Users.AccountRoleConfiguration"/>'s real FK from AccountRole.UserId onto
+        /// Profile.UserId).
+        /// </summary>
+        /// <remarks>
+        /// <b>Not mirrored from any SQLite reference script - this closes a gap that has no SQLite-side
+        /// equivalent to keep in sync with.</b> On SQLite, <c>Defaults/defaults.db</c> (built from the committed
+        /// dev fixture <c>Data/users.db</c>) already ships this admin account pre-seeded end-to-end under a fixed,
+        /// well-known <see cref="Guid"/>: an <c>AspNetUsers</c> row, a matching <c>Profile</c> row, and - critically -
+        /// an <c>AccountRole</c> row already linking that same <see cref="Guid"/> to the "Administrator"
+        /// <c>Role</c> row (confirmed by inspection of <c>Data/users.db</c>). So on a fresh SQLite install, this
+        /// class's <c>ValidateEncryptionAndCreateAdminUserAsync</c>'s own <c>userManager.FindByNameAsync(Constants.DEFAULTUSERNAME)</c>
+        /// call finds that pre-existing, already-role-member Identity user (not <see langword="null"/>) and never
+        /// takes the "create a new one" branch at all - the SQLite reference itself never needs to insert an
+        /// AccountRole row here because one already exists by construction.
+        /// <para>
+        /// This driver's seed data has no equivalent: the provider-neutral seed package
+        /// (<c>Seed/tightwiki.seed.zip</c>, Database-Providers-Plan.md chapter 4.6) deliberately carries only
+        /// configuration/themes/feature templates/wiki pages/menu items/emoji - no user, profile, role, or
+        /// account-role data (by design; a dynamically-generated ASP.NET Identity <see cref="Guid"/> cannot be
+        /// baked into a static seed package the way SQLite's fixed-Guid dev fixture can). So on a fresh SQL
+        /// Server/Postgres install, <c>userManager.FindByNameAsync</c> above always takes the "create a new
+        /// <see cref="IdentityUser"/>" branch, and without this method that new user would be left with the
+        /// "Administrator" <see cref="ClaimTypes.Role"/> claim (see the <c>claimsToAdd</c> block above) but zero
+        /// <c>Users.AccountRole</c> rows - which matters because <c>TwSessionState.IsAdministrator</c>/
+        /// <c>HoldsPermission</c> (the wiki's own authorization system, entirely separate from ASP.NET Identity's
+        /// own claims/roles) never consults that claim at all: <see cref="IsUserMemberOfAdministrators"/> is the
+        /// only thing that sets <c>IsAdministrator</c>, and it is purely an <c>Users.AccountRole</c> JOIN
+        /// <c>Users.Role</c> query. Confirmed live against SQL Server LocalDB, before this fix existed: the
+        /// freshly seeded admin account could authenticate (log in successfully) but held zero permissions on
+        /// anything at all, including reading the public home page - every request redirected to
+        /// <c>/Utility/Notify?NotifyErrorMessage=You+do+not+have+permission+to+perform+the+action%3A+Read</c>.
+        /// </para>
+        /// <para>
+        /// Existence-checked rather than an unconditional insert (mirroring <see cref="IsAccountAMemberOfRole"/>'s
+        /// own "check before insert" shape, though without its <see cref="MemCache"/> layer - this runs once at
+        /// startup, well before any request could have populated or relied on that cache) since
+        /// <see cref="Configurations.Users.AccountRoleConfiguration"/>'s real unique index on
+        /// <c>(UserId, RoleId)</c> would otherwise throw a <see cref="Microsoft.EntityFrameworkCore.DbUpdateException"/>
+        /// if this whole gated block ever re-runs for the same admin user (e.g. a later <see cref="SetAdminPasswordClear"/>
+        /// call re-arming <see cref="TwAdminPasswordChangeState.NeedsToBeSet"/> on a subsequent "first run").
+        /// A missing "Administrator" <c>Users.Role</c> row (never expected in practice - it is one of the five
+        /// <c>IsBuiltIn</c> roles <see cref="Configurations.Users.RoleConfiguration"/> seeds via migration
+        /// <c>HasData</c>) is treated as a silent no-op rather than thrown, consistent with how
+        /// <see cref="InsertRoleMemberAndBuildResultAsync"/> already handles the same "role does not exist" case
+        /// for every other caller of the role-membership members in this class.
+        /// </para>
+        /// </remarks>
+        private async Task EnsureAdministratorRoleMembership(Guid userId)
+        {
+            using var context = _createContext();
+
+            var administratorRoleId = await context.Roles
+                .Where(r => r.Name == TwRoles.Administrator.ToString())
+                .Select(r => (int?)r.Id)
+                .FirstOrDefaultAsync();
+
+            if (administratorRoleId == null)
+            {
+                return;
+            }
+
+            var alreadyMember = await context.AccountRoles
+                .AnyAsync(ar => ar.UserId == userId && ar.RoleId == administratorRoleId.Value);
+
+            if (!alreadyMember)
+            {
+                context.AccountRoles.Add(new UsersEntities.AccountRole { UserId = userId, RoleId = administratorRoleId.Value });
+                await context.SaveChangesAsync();
             }
         }
 
