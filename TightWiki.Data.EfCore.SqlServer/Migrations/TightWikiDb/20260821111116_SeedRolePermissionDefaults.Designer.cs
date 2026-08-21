@@ -2,56 +2,58 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
-using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using TightWiki.Data.EfCore;
 
 #nullable disable
 
-namespace TightWiki.Data.EfCore.Postgres.Migrations.TightWikiDb
+namespace TightWiki.Data.EfCore.SqlServer.Migrations.TightWikiDb
 {
     [DbContext(typeof(TightWikiDbContext))]
-    partial class TightWikiDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260821111116_SeedRolePermissionDefaults")]
+    partial class SeedRolePermissionDefaults
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
                 .HasAnnotation("ProductVersion", "10.0.10")
-                .HasAnnotation("Relational:MaxIdentifierLength", 63);
+                .HasAnnotation("Relational:MaxIdentifierLength", 128);
 
-            NpgsqlModelBuilderExtensions.HasPostgresExtension(modelBuilder, "citext");
-            NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
+            SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
 
             modelBuilder.Entity("TightWiki.Data.EfCore.Entities.Config.ConfigurationEntry", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
                     b.Property<int>("ConfigurationGroupId")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<int>("DataTypeId")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<string>("Description")
-                        .HasColumnType("citext");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<bool>("IsEncrypted")
-                        .HasColumnType("boolean");
+                        .HasColumnType("bit");
 
                     b.Property<bool>("IsRequired")
-                        .HasColumnType("boolean");
+                        .HasColumnType("bit");
 
                     b.Property<string>("Name")
                         .IsRequired()
-                        .HasColumnType("citext");
+                        .HasColumnType("nvarchar(450)");
 
                     b.Property<string>("Value")
-                        .HasColumnType("text");
+                        .HasColumnType("nvarchar(max)");
 
                     b.HasKey("Id");
 
@@ -65,16 +67,16 @@ namespace TightWiki.Data.EfCore.Postgres.Migrations.TightWikiDb
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
                     b.Property<string>("Description")
-                        .HasColumnType("citext");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("Name")
                         .IsRequired()
-                        .HasColumnType("citext");
+                        .HasColumnType("nvarchar(450)");
 
                     b.HasKey("Id");
 
@@ -87,7 +89,7 @@ namespace TightWiki.Data.EfCore.Postgres.Migrations.TightWikiDb
             modelBuilder.Entity("TightWiki.Data.EfCore.Entities.Config.CryptoCheck", b =>
                 {
                     b.Property<string>("Content")
-                        .HasColumnType("text");
+                        .HasColumnType("nvarchar(max)");
 
                     b.ToTable("CryptoCheck", "Config");
                 });
@@ -96,17 +98,18 @@ namespace TightWiki.Data.EfCore.Postgres.Migrations.TightWikiDb
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
                     b.Property<string>("Name")
-                        .HasColumnType("citext");
+                        .HasColumnType("nvarchar(450)");
 
                     b.HasKey("Id");
 
                     b.HasIndex("Name")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("[Name] IS NOT NULL");
 
                     b.ToTable("DataType", "Config");
 
@@ -142,20 +145,20 @@ namespace TightWiki.Data.EfCore.Postgres.Migrations.TightWikiDb
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
                     b.Property<string>("Link")
                         .IsRequired()
-                        .HasColumnType("citext");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("Name")
                         .IsRequired()
-                        .HasColumnType("citext");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<int>("Ordinal")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.HasKey("Id");
 
@@ -165,31 +168,31 @@ namespace TightWiki.Data.EfCore.Postgres.Migrations.TightWikiDb
             modelBuilder.Entity("TightWiki.Data.EfCore.Entities.Config.Theme", b =>
                 {
                     b.Property<string>("Name")
-                        .HasColumnType("text");
+                        .HasColumnType("nvarchar(450)");
 
                     b.Property<string>("ClassBranding")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("ClassDropdown")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("ClassNavBar")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("ClassNavLink")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("DelimitedFiles")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("EditorTheme")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasColumnType("nvarchar(max)");
 
                     b.HasKey("Name");
 
@@ -200,17 +203,17 @@ namespace TightWiki.Data.EfCore.Postgres.Migrations.TightWikiDb
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
                     b.Property<string>("Name")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasColumnType("nvarchar(450)");
 
                     b.Property<string>("Value")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasColumnType("nvarchar(max)");
 
                     b.HasKey("Id");
 
@@ -223,16 +226,16 @@ namespace TightWiki.Data.EfCore.Postgres.Migrations.TightWikiDb
             modelBuilder.Entity("TightWiki.Data.EfCore.Entities.DeletedPageRevisions.DeletionMeta", b =>
                 {
                     b.Property<int>("PageId")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<int>("Revision")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<Guid?>("DeletedByUserId")
-                        .HasColumnType("uuid");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime?>("DeletedDate")
-                        .HasColumnType("timestamp with time zone");
+                        .HasColumnType("datetime2");
 
                     b.HasKey("PageId", "Revision");
 
@@ -244,37 +247,37 @@ namespace TightWiki.Data.EfCore.Postgres.Migrations.TightWikiDb
             modelBuilder.Entity("TightWiki.Data.EfCore.Entities.DeletedPageRevisions.PageRevision", b =>
                 {
                     b.Property<int>("PageId")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<int>("Revision")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<string>("Body")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("ChangeSummary")
-                        .HasColumnType("text");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<int>("DataHash")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<string>("Description")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<Guid>("ModifiedByUserId")
-                        .HasColumnType("uuid");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime>("ModifiedDate")
-                        .HasColumnType("timestamp with time zone");
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("Name")
                         .IsRequired()
-                        .HasColumnType("citext");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("Namespace")
-                        .HasColumnType("citext");
+                        .HasColumnType("nvarchar(max)");
 
                     b.HasKey("PageId", "Revision");
 
@@ -286,16 +289,16 @@ namespace TightWiki.Data.EfCore.Postgres.Migrations.TightWikiDb
             modelBuilder.Entity("TightWiki.Data.EfCore.Entities.DeletedPageRevisions.PageRevisionAttachment", b =>
                 {
                     b.Property<int>("PageId")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<int>("PageFileId")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<int>("FileRevision")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<int>("PageRevision")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.HasKey("PageId", "PageFileId", "FileRevision", "PageRevision");
 
@@ -305,19 +308,17 @@ namespace TightWiki.Data.EfCore.Postgres.Migrations.TightWikiDb
             modelBuilder.Entity("TightWiki.Data.EfCore.Entities.DeletedPages.DeletionMeta", b =>
                 {
                     b.Property<int>("PageId")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<Guid?>("DeletedByUserId")
-                        .HasColumnType("uuid");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime?>("DeletedDate")
-                        .HasColumnType("timestamp with time zone");
+                        .HasColumnType("datetime2");
 
-                    b.HasKey("PageId")
-                        .HasName("PK_DeletionMeta1");
+                    b.HasKey("PageId");
 
-                    b.HasIndex("DeletedByUserId")
-                        .HasDatabaseName("IX_DeletionMeta_DeletedByUserId1");
+                    b.HasIndex("DeletedByUserId");
 
                     b.ToTable("DeletionMeta", "DeletedPages");
                 });
@@ -325,38 +326,38 @@ namespace TightWiki.Data.EfCore.Postgres.Migrations.TightWikiDb
             modelBuilder.Entity("TightWiki.Data.EfCore.Entities.DeletedPages.Page", b =>
                 {
                     b.Property<int>("Id")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<Guid>("CreatedByUserId")
-                        .HasColumnType("uuid");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime>("CreatedDate")
-                        .HasColumnType("timestamp with time zone");
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("Description")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<Guid>("ModifiedByUserId")
-                        .HasColumnType("uuid");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime>("ModifiedDate")
-                        .HasColumnType("timestamp with time zone");
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("Name")
                         .IsRequired()
-                        .HasColumnType("citext");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("Namespace")
                         .IsRequired()
-                        .HasColumnType("citext");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("Navigation")
                         .IsRequired()
-                        .HasColumnType("citext");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<int>("Revision")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.HasKey("Id");
 
@@ -370,20 +371,20 @@ namespace TightWiki.Data.EfCore.Postgres.Migrations.TightWikiDb
             modelBuilder.Entity("TightWiki.Data.EfCore.Entities.DeletedPages.PageComment", b =>
                 {
                     b.Property<int>("Id")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<string>("Body")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<DateTime>("CreatedDate")
-                        .HasColumnType("timestamp with time zone");
+                        .HasColumnType("datetime2");
 
                     b.Property<int>("PageId")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
+                        .HasColumnType("uniqueidentifier");
 
                     b.HasKey("Id");
 
@@ -395,24 +396,24 @@ namespace TightWiki.Data.EfCore.Postgres.Migrations.TightWikiDb
             modelBuilder.Entity("TightWiki.Data.EfCore.Entities.DeletedPages.PageFile", b =>
                 {
                     b.Property<int>("Id")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<DateTime>("CreatedDate")
-                        .HasColumnType("timestamp with time zone");
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("Name")
                         .IsRequired()
-                        .HasColumnType("citext");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("Navigation")
                         .IsRequired()
-                        .HasColumnType("citext");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<int>("PageId")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<int>("Revision")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.HasKey("Id");
 
@@ -422,27 +423,27 @@ namespace TightWiki.Data.EfCore.Postgres.Migrations.TightWikiDb
             modelBuilder.Entity("TightWiki.Data.EfCore.Entities.DeletedPages.PageFileRevision", b =>
                 {
                     b.Property<int>("PageFileId")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<int>("Revision")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<string>("ContentType")
                         .IsRequired()
-                        .HasColumnType("citext");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<Guid>("CreatedByUserId")
-                        .HasColumnType("uuid");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime>("CreatedDate")
-                        .HasColumnType("timestamp with time zone");
+                        .HasColumnType("datetime2");
 
                     b.Property<byte[]>("Data")
                         .IsRequired()
-                        .HasColumnType("bytea");
+                        .HasColumnType("varbinary(max)");
 
                     b.Property<int>("DataHash")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<long>("Size")
                         .HasColumnType("bigint");
@@ -457,10 +458,10 @@ namespace TightWiki.Data.EfCore.Postgres.Migrations.TightWikiDb
             modelBuilder.Entity("TightWiki.Data.EfCore.Entities.DeletedPages.PageProcessingInstruction", b =>
                 {
                     b.Property<int>("PageId")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<string>("Instruction")
-                        .HasColumnType("citext");
+                        .HasColumnType("nvarchar(450)");
 
                     b.HasKey("PageId", "Instruction");
 
@@ -470,43 +471,41 @@ namespace TightWiki.Data.EfCore.Postgres.Migrations.TightWikiDb
             modelBuilder.Entity("TightWiki.Data.EfCore.Entities.DeletedPages.PageRevision", b =>
                 {
                     b.Property<int>("PageId")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<int>("Revision")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<string>("Body")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("ChangeSummary")
-                        .HasColumnType("text");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<int>("DataHash")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<string>("Description")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<Guid>("ModifiedByUserId")
-                        .HasColumnType("uuid");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime>("ModifiedDate")
-                        .HasColumnType("timestamp with time zone");
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("Name")
                         .IsRequired()
-                        .HasColumnType("citext");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("Namespace")
-                        .HasColumnType("citext");
+                        .HasColumnType("nvarchar(max)");
 
-                    b.HasKey("PageId", "Revision")
-                        .HasName("PK_PageRevision1");
+                    b.HasKey("PageId", "Revision");
 
-                    b.HasIndex("ModifiedByUserId")
-                        .HasDatabaseName("IX_PageRevision_ModifiedByUserId1");
+                    b.HasIndex("ModifiedByUserId");
 
                     b.ToTable("PageRevision", "DeletedPages");
                 });
@@ -514,19 +513,18 @@ namespace TightWiki.Data.EfCore.Postgres.Migrations.TightWikiDb
             modelBuilder.Entity("TightWiki.Data.EfCore.Entities.DeletedPages.PageRevisionAttachment", b =>
                 {
                     b.Property<int>("PageId")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<int>("PageFileId")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<int>("FileRevision")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<int>("PageRevision")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
-                    b.HasKey("PageId", "PageFileId", "FileRevision", "PageRevision")
-                        .HasName("PK_PageRevisionAttachment1");
+                    b.HasKey("PageId", "PageFileId", "FileRevision", "PageRevision");
 
                     b.ToTable("PageRevisionAttachment", "DeletedPages");
                 });
@@ -534,10 +532,10 @@ namespace TightWiki.Data.EfCore.Postgres.Migrations.TightWikiDb
             modelBuilder.Entity("TightWiki.Data.EfCore.Entities.DeletedPages.PageTag", b =>
                 {
                     b.Property<int>("PageId")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<string>("Tag")
-                        .HasColumnType("citext");
+                        .HasColumnType("nvarchar(450)");
 
                     b.HasKey("PageId", "Tag");
 
@@ -547,17 +545,17 @@ namespace TightWiki.Data.EfCore.Postgres.Migrations.TightWikiDb
             modelBuilder.Entity("TightWiki.Data.EfCore.Entities.DeletedPages.PageToken", b =>
                 {
                     b.Property<int>("PageId")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<string>("Token")
-                        .HasColumnType("citext");
+                        .HasColumnType("nvarchar(450)");
 
                     b.Property<string>("DoubleMetaphone")
                         .IsRequired()
-                        .HasColumnType("citext");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<double>("Weight")
-                        .HasColumnType("double precision");
+                        .HasColumnType("float");
 
                     b.HasKey("PageId", "Token");
 
@@ -568,19 +566,19 @@ namespace TightWiki.Data.EfCore.Postgres.Migrations.TightWikiDb
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
                     b.Property<byte[]>("ImageData")
-                        .HasColumnType("bytea");
+                        .HasColumnType("varbinary(max)");
 
                     b.Property<string>("MimeType")
-                        .HasColumnType("citext");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("Name")
                         .IsRequired()
-                        .HasColumnType("citext");
+                        .HasColumnType("nvarchar(450)");
 
                     b.HasKey("Id");
 
@@ -594,16 +592,16 @@ namespace TightWiki.Data.EfCore.Postgres.Migrations.TightWikiDb
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
                     b.Property<string>("Category")
                         .IsRequired()
-                        .HasColumnType("citext");
+                        .HasColumnType("nvarchar(450)");
 
                     b.Property<int>("EmojiId")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.HasKey("Id");
 
@@ -617,24 +615,24 @@ namespace TightWiki.Data.EfCore.Postgres.Migrations.TightWikiDb
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
                     b.Property<DateTime?>("CreatedDate")
-                        .HasColumnType("timestamp with time zone");
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("ExceptionText")
-                        .HasColumnType("text");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<int?>("SeverityId")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<string>("StackTrace")
-                        .HasColumnType("text");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("Text")
-                        .HasColumnType("text");
+                        .HasColumnType("nvarchar(max)");
 
                     b.HasKey("Id");
 
@@ -647,13 +645,13 @@ namespace TightWiki.Data.EfCore.Postgres.Migrations.TightWikiDb
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
                     b.Property<string>("Name")
                         .IsRequired()
-                        .HasColumnType("citext");
+                        .HasColumnType("nvarchar(450)");
 
                     b.HasKey("Id");
 
@@ -703,17 +701,17 @@ namespace TightWiki.Data.EfCore.Postgres.Migrations.TightWikiDb
             modelBuilder.Entity("TightWiki.Data.EfCore.Entities.Pages.CurrentPageEditor", b =>
                 {
                     b.Property<int>("PageId")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("AccountName")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<DateTime>("UtcDate")
-                        .HasColumnType("timestamp with time zone")
+                        .HasColumnType("datetime2")
                         .HasColumnName("UTCDate");
 
                     b.HasKey("PageId", "UserId");
@@ -726,19 +724,19 @@ namespace TightWiki.Data.EfCore.Postgres.Migrations.TightWikiDb
             modelBuilder.Entity("TightWiki.Data.EfCore.Entities.Pages.FeatureTemplate", b =>
                 {
                     b.Property<string>("Name")
-                        .HasColumnType("citext");
+                        .HasColumnType("nvarchar(450)");
 
                     b.Property<string>("Type")
-                        .HasColumnType("citext");
+                        .HasColumnType("nvarchar(450)");
 
                     b.Property<string>("Description")
-                        .HasColumnType("text");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<int?>("PageId")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<string>("TemplateText")
-                        .HasColumnType("text");
+                        .HasColumnType("nvarchar(max)");
 
                     b.HasKey("Name", "Type");
 
@@ -751,49 +749,46 @@ namespace TightWiki.Data.EfCore.Postgres.Migrations.TightWikiDb
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
                     b.Property<Guid>("CreatedByUserId")
-                        .HasColumnType("uuid");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime>("CreatedDate")
-                        .HasColumnType("timestamp with time zone");
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("Description")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<Guid>("ModifiedByUserId")
-                        .HasColumnType("uuid");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime>("ModifiedDate")
-                        .HasColumnType("timestamp with time zone");
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("Name")
                         .IsRequired()
-                        .HasColumnType("citext");
+                        .HasColumnType("nvarchar(450)");
 
                     b.Property<string>("Namespace")
                         .IsRequired()
-                        .HasColumnType("citext");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("Navigation")
                         .IsRequired()
-                        .HasColumnType("citext");
+                        .HasColumnType("nvarchar(450)");
 
                     b.Property<int>("Revision")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
-                    b.HasKey("Id")
-                        .HasName("PK_Page1");
+                    b.HasKey("Id");
 
-                    b.HasIndex("CreatedByUserId")
-                        .HasDatabaseName("IX_Page_CreatedByUserId1");
+                    b.HasIndex("CreatedByUserId");
 
-                    b.HasIndex("ModifiedByUserId")
-                        .HasDatabaseName("IX_Page_ModifiedByUserId1");
+                    b.HasIndex("ModifiedByUserId");
 
                     b.HasIndex(new[] { "Name" }, "IX_Page_Name")
                         .IsUnique();
@@ -808,28 +803,26 @@ namespace TightWiki.Data.EfCore.Postgres.Migrations.TightWikiDb
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
                     b.Property<string>("Body")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<DateTime>("CreatedDate")
-                        .HasColumnType("timestamp with time zone");
+                        .HasColumnType("datetime2");
 
                     b.Property<int>("PageId")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
+                        .HasColumnType("uniqueidentifier");
 
-                    b.HasKey("Id")
-                        .HasName("PK_PageComment1");
+                    b.HasKey("Id");
 
-                    b.HasIndex("UserId")
-                        .HasDatabaseName("IX_PageComment_UserId1");
+                    b.HasIndex("UserId");
 
                     b.HasIndex(new[] { "PageId" }, "IX_PageComment_PageId");
 
@@ -840,29 +833,28 @@ namespace TightWiki.Data.EfCore.Postgres.Migrations.TightWikiDb
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
                     b.Property<DateTime>("CreatedDate")
-                        .HasColumnType("timestamp with time zone");
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("Name")
                         .IsRequired()
-                        .HasColumnType("citext");
+                        .HasColumnType("nvarchar(450)");
 
                     b.Property<string>("Navigation")
                         .IsRequired()
-                        .HasColumnType("citext");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<int>("PageId")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<int>("Revision")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
-                    b.HasKey("Id")
-                        .HasName("PK_PageFile1");
+                    b.HasKey("Id");
 
                     b.HasIndex(new[] { "PageId", "Name", "Revision" }, "IX_PageFile_PageId_Name_Revision")
                         .IsUnique();
@@ -873,36 +865,34 @@ namespace TightWiki.Data.EfCore.Postgres.Migrations.TightWikiDb
             modelBuilder.Entity("TightWiki.Data.EfCore.Entities.Pages.PageFileRevision", b =>
                 {
                     b.Property<int>("PageFileId")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<int>("Revision")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<string>("ContentType")
                         .IsRequired()
-                        .HasColumnType("citext");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<Guid>("CreatedByUserId")
-                        .HasColumnType("uuid");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime>("CreatedDate")
-                        .HasColumnType("timestamp with time zone");
+                        .HasColumnType("datetime2");
 
                     b.Property<byte[]>("Data")
                         .IsRequired()
-                        .HasColumnType("bytea");
+                        .HasColumnType("varbinary(max)");
 
                     b.Property<int>("DataHash")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<long>("Size")
                         .HasColumnType("bigint");
 
-                    b.HasKey("PageFileId", "Revision")
-                        .HasName("PK_PageFileRevision1");
+                    b.HasKey("PageFileId", "Revision");
 
-                    b.HasIndex("CreatedByUserId")
-                        .HasDatabaseName("IX_PageFileRevision_CreatedByUserId1");
+                    b.HasIndex("CreatedByUserId");
 
                     b.ToTable("PageFileRevision", "Pages");
                 });
@@ -910,13 +900,12 @@ namespace TightWiki.Data.EfCore.Postgres.Migrations.TightWikiDb
             modelBuilder.Entity("TightWiki.Data.EfCore.Entities.Pages.PageProcessingInstruction", b =>
                 {
                     b.Property<int>("PageId")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<string>("Instruction")
-                        .HasColumnType("citext");
+                        .HasColumnType("nvarchar(450)");
 
-                    b.HasKey("PageId", "Instruction")
-                        .HasName("PK_PageProcessingInstruction1");
+                    b.HasKey("PageId", "Instruction");
 
                     b.ToTable("PageProcessingInstruction", "Pages");
                 });
@@ -924,17 +913,17 @@ namespace TightWiki.Data.EfCore.Postgres.Migrations.TightWikiDb
             modelBuilder.Entity("TightWiki.Data.EfCore.Entities.Pages.PageReference", b =>
                 {
                     b.Property<int>("PageId")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<string>("ReferencesPageNavigation")
-                        .HasColumnType("citext");
+                        .HasColumnType("nvarchar(450)");
 
                     b.Property<int?>("ReferencesPageId")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<string>("ReferencesPageName")
                         .IsRequired()
-                        .HasColumnType("citext");
+                        .HasColumnType("nvarchar(max)");
 
                     b.HasKey("PageId", "ReferencesPageNavigation");
 
@@ -946,43 +935,41 @@ namespace TightWiki.Data.EfCore.Postgres.Migrations.TightWikiDb
             modelBuilder.Entity("TightWiki.Data.EfCore.Entities.Pages.PageRevision", b =>
                 {
                     b.Property<int>("PageId")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<int>("Revision")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<string>("Body")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("ChangeSummary")
-                        .HasColumnType("text");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<int>("DataHash")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<string>("Description")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<Guid>("ModifiedByUserId")
-                        .HasColumnType("uuid");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime>("ModifiedDate")
-                        .HasColumnType("timestamp with time zone");
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("Name")
                         .IsRequired()
-                        .HasColumnType("citext");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("Namespace")
-                        .HasColumnType("citext");
+                        .HasColumnType("nvarchar(max)");
 
-                    b.HasKey("PageId", "Revision")
-                        .HasName("PK_PageRevision2");
+                    b.HasKey("PageId", "Revision");
 
-                    b.HasIndex("ModifiedByUserId")
-                        .HasDatabaseName("IX_PageRevision_ModifiedByUserId2");
+                    b.HasIndex("ModifiedByUserId");
 
                     b.ToTable("PageRevision", "Pages");
                 });
@@ -990,19 +977,18 @@ namespace TightWiki.Data.EfCore.Postgres.Migrations.TightWikiDb
             modelBuilder.Entity("TightWiki.Data.EfCore.Entities.Pages.PageRevisionAttachment", b =>
                 {
                     b.Property<int>("PageId")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<int>("PageFileId")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<int>("FileRevision")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<int>("PageRevision")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
-                    b.HasKey("PageId", "PageFileId", "FileRevision", "PageRevision")
-                        .HasName("PK_PageRevisionAttachment2");
+                    b.HasKey("PageId", "PageFileId", "FileRevision", "PageRevision");
 
                     b.HasIndex("PageFileId");
 
@@ -1015,19 +1001,18 @@ namespace TightWiki.Data.EfCore.Postgres.Migrations.TightWikiDb
             modelBuilder.Entity("TightWiki.Data.EfCore.Entities.Pages.PageTag", b =>
                 {
                     b.Property<int>("PageId")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<string>("Tag")
-                        .HasColumnType("citext");
+                        .HasColumnType("nvarchar(450)");
 
                     b.Property<string>("Navigation")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("citext")
+                        .HasColumnType("nvarchar(max)")
                         .HasDefaultValue("");
 
-                    b.HasKey("PageId", "Tag")
-                        .HasName("PK_PageTag1");
+                    b.HasKey("PageId", "Tag");
 
                     b.ToTable("PageTag", "Pages");
                 });
@@ -1035,20 +1020,19 @@ namespace TightWiki.Data.EfCore.Postgres.Migrations.TightWikiDb
             modelBuilder.Entity("TightWiki.Data.EfCore.Entities.Pages.PageToken", b =>
                 {
                     b.Property<int>("PageId")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<string>("Token")
-                        .HasColumnType("citext");
+                        .HasColumnType("nvarchar(450)");
 
                     b.Property<string>("DoubleMetaphone")
                         .IsRequired()
-                        .HasColumnType("citext");
+                        .HasColumnType("nvarchar(450)");
 
                     b.Property<double>("Weight")
-                        .HasColumnType("double precision");
+                        .HasColumnType("float");
 
-                    b.HasKey("PageId", "Token")
-                        .HasName("PK_PageToken1");
+                    b.HasKey("PageId", "Token");
 
                     b.HasIndex(new[] { "DoubleMetaphone", "PageId", "Weight" }, "idx_PageToken_DoubleMetaphone_PageId_Weight");
 
@@ -1063,47 +1047,47 @@ namespace TightWiki.Data.EfCore.Postgres.Migrations.TightWikiDb
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
                     b.Property<int?>("LastBodySize")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<DateTime>("LastCompileDateTime")
-                        .HasColumnType("timestamp with time zone");
+                        .HasColumnType("datetime2");
 
                     b.Property<int?>("LastErrorCount")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<int?>("LastMatchCount")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<int?>("LastOutgoingLinkCount")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<int?>("LastProcessedBodySize")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<int?>("LastTagCount")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<double?>("LastWikifyTimeMs")
-                        .HasColumnType("double precision");
+                        .HasColumnType("float");
 
                     b.Property<int>("PageId")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<int>("TotalCompilationCount")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<int>("TotalViewCount")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
+                        .HasColumnType("int")
                         .HasDefaultValue(0);
 
                     b.Property<double?>("TotalWikifyTimeMs")
-                        .HasColumnType("double precision");
+                        .HasColumnType("float");
 
                     b.HasKey("Id");
 
@@ -1117,24 +1101,24 @@ namespace TightWiki.Data.EfCore.Postgres.Migrations.TightWikiDb
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
                     b.Property<string>("Namespace")
-                        .HasColumnType("text");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("PageId")
-                        .HasColumnType("text");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<int>("PermissionDispositionId")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<int>("PermissionId")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
+                        .HasColumnType("uniqueidentifier");
 
                     b.HasKey("Id");
 
@@ -1151,15 +1135,15 @@ namespace TightWiki.Data.EfCore.Postgres.Migrations.TightWikiDb
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
                     b.Property<int>("RoleId")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
+                        .HasColumnType("uniqueidentifier");
 
                     b.HasKey("Id");
 
@@ -1174,7 +1158,7 @@ namespace TightWiki.Data.EfCore.Postgres.Migrations.TightWikiDb
             modelBuilder.Entity("TightWiki.Data.EfCore.Entities.Users.AdminPwCheck", b =>
                 {
                     b.Property<int?>("Value")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.ToTable("AdminPwCheck", "Users");
                 });
@@ -1183,16 +1167,16 @@ namespace TightWiki.Data.EfCore.Postgres.Migrations.TightWikiDb
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
                     b.Property<string>("Description")
-                        .HasColumnType("text");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("Name")
                         .IsRequired()
-                        .HasColumnType("citext");
+                        .HasColumnType("nvarchar(450)");
 
                     b.HasKey("Id");
 
@@ -1238,13 +1222,13 @@ namespace TightWiki.Data.EfCore.Postgres.Migrations.TightWikiDb
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
                     b.Property<string>("Name")
                         .IsRequired()
-                        .HasColumnType("citext");
+                        .HasColumnType("nvarchar(450)");
 
                     b.HasKey("Id");
 
@@ -1269,36 +1253,38 @@ namespace TightWiki.Data.EfCore.Postgres.Migrations.TightWikiDb
             modelBuilder.Entity("TightWiki.Data.EfCore.Entities.Users.Profile", b =>
                 {
                     b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("AccountName")
-                        .HasColumnType("text");
+                        .HasColumnType("nvarchar(450)");
 
                     b.Property<byte[]>("Avatar")
-                        .HasColumnType("bytea");
+                        .HasColumnType("varbinary(max)");
 
                     b.Property<string>("AvatarContentType")
-                        .HasColumnType("text");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("Biography")
-                        .HasColumnType("text");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<DateTime>("CreatedDate")
-                        .HasColumnType("timestamp with time zone");
+                        .HasColumnType("datetime2");
 
                     b.Property<DateTime>("ModifiedDate")
-                        .HasColumnType("timestamp with time zone");
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("Navigation")
-                        .HasColumnType("citext");
+                        .HasColumnType("nvarchar(450)");
 
                     b.HasKey("UserId");
 
                     b.HasIndex("AccountName")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("[AccountName] IS NOT NULL");
 
                     b.HasIndex("Navigation")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("[Navigation] IS NOT NULL");
 
                     b.HasIndex(new[] { "UserId", "AccountName" }, "idx_Profile_UserId_AccountName");
 
@@ -1309,21 +1295,21 @@ namespace TightWiki.Data.EfCore.Postgres.Migrations.TightWikiDb
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
                     b.Property<string>("Description")
-                        .HasColumnType("citext");
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<bool>("IsBuiltIn")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("boolean")
+                        .HasColumnType("bit")
                         .HasDefaultValue(true);
 
                     b.Property<string>("Name")
                         .IsRequired()
-                        .HasColumnType("citext");
+                        .HasColumnType("nvarchar(450)");
 
                     b.HasKey("Id");
 
@@ -1374,24 +1360,24 @@ namespace TightWiki.Data.EfCore.Postgres.Migrations.TightWikiDb
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
                     b.Property<string>("Namespace")
-                        .HasColumnType("text");
+                        .HasColumnType("nvarchar(450)");
 
                     b.Property<string>("PageId")
-                        .HasColumnType("text");
+                        .HasColumnType("nvarchar(450)");
 
                     b.Property<int>("PermissionDispositionId")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<int>("PermissionId")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.Property<int>("RoleId")
-                        .HasColumnType("integer");
+                        .HasColumnType("int");
 
                     b.HasKey("Id");
 
@@ -1400,7 +1386,8 @@ namespace TightWiki.Data.EfCore.Postgres.Migrations.TightWikiDb
                     b.HasIndex("PermissionId");
 
                     b.HasIndex("RoleId", "PermissionId", "Namespace", "PageId", "PermissionDispositionId")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("[Namespace] IS NOT NULL AND [PageId] IS NOT NULL");
 
                     b.ToTable("RolePermission", "Users");
 

@@ -1387,6 +1387,216 @@ namespace TightWiki.Data.EfCore.SqlServer.Migrations.TightWikiDb
                         .HasFilter("[Namespace] IS NOT NULL AND [PageId] IS NOT NULL");
 
                     b.ToTable("RolePermission", "Users");
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            PageId = "*",
+                            PermissionDispositionId = 1,
+                            PermissionId = 1,
+                            RoleId = 1
+                        },
+                        new
+                        {
+                            Id = 2,
+                            Namespace = "*",
+                            PermissionDispositionId = 1,
+                            PermissionId = 1,
+                            RoleId = 1
+                        },
+                        new
+                        {
+                            Id = 3,
+                            PageId = "*",
+                            PermissionDispositionId = 1,
+                            PermissionId = 2,
+                            RoleId = 1
+                        },
+                        new
+                        {
+                            Id = 4,
+                            Namespace = "*",
+                            PermissionDispositionId = 1,
+                            PermissionId = 2,
+                            RoleId = 1
+                        },
+                        new
+                        {
+                            Id = 5,
+                            PageId = "*",
+                            PermissionDispositionId = 1,
+                            PermissionId = 3,
+                            RoleId = 1
+                        },
+                        new
+                        {
+                            Id = 6,
+                            Namespace = "*",
+                            PermissionDispositionId = 1,
+                            PermissionId = 3,
+                            RoleId = 1
+                        },
+                        new
+                        {
+                            Id = 7,
+                            PageId = "*",
+                            PermissionDispositionId = 1,
+                            PermissionId = 4,
+                            RoleId = 1
+                        },
+                        new
+                        {
+                            Id = 8,
+                            Namespace = "*",
+                            PermissionDispositionId = 1,
+                            PermissionId = 4,
+                            RoleId = 1
+                        },
+                        new
+                        {
+                            Id = 9,
+                            PageId = "*",
+                            PermissionDispositionId = 1,
+                            PermissionId = 5,
+                            RoleId = 1
+                        },
+                        new
+                        {
+                            Id = 10,
+                            Namespace = "*",
+                            PermissionDispositionId = 1,
+                            PermissionId = 5,
+                            RoleId = 1
+                        },
+                        new
+                        {
+                            Id = 11,
+                            PageId = "*",
+                            PermissionDispositionId = 1,
+                            PermissionId = 5,
+                            RoleId = 5
+                        },
+                        new
+                        {
+                            Id = 12,
+                            Namespace = "*",
+                            PermissionDispositionId = 1,
+                            PermissionId = 5,
+                            RoleId = 5
+                        },
+                        new
+                        {
+                            Id = 13,
+                            PageId = "*",
+                            PermissionDispositionId = 1,
+                            PermissionId = 5,
+                            RoleId = 2
+                        },
+                        new
+                        {
+                            Id = 14,
+                            Namespace = "*",
+                            PermissionDispositionId = 1,
+                            PermissionId = 5,
+                            RoleId = 2
+                        },
+                        new
+                        {
+                            Id = 15,
+                            PageId = "*",
+                            PermissionDispositionId = 1,
+                            PermissionId = 2,
+                            RoleId = 4
+                        },
+                        new
+                        {
+                            Id = 16,
+                            Namespace = "*",
+                            PermissionDispositionId = 1,
+                            PermissionId = 2,
+                            RoleId = 4
+                        },
+                        new
+                        {
+                            Id = 17,
+                            PageId = "*",
+                            PermissionDispositionId = 1,
+                            PermissionId = 3,
+                            RoleId = 4
+                        },
+                        new
+                        {
+                            Id = 18,
+                            Namespace = "*",
+                            PermissionDispositionId = 1,
+                            PermissionId = 3,
+                            RoleId = 4
+                        },
+                        new
+                        {
+                            Id = 19,
+                            PageId = "*",
+                            PermissionDispositionId = 1,
+                            PermissionId = 4,
+                            RoleId = 4
+                        },
+                        new
+                        {
+                            Id = 20,
+                            Namespace = "*",
+                            PermissionDispositionId = 1,
+                            PermissionId = 4,
+                            RoleId = 4
+                        },
+                        new
+                        {
+                            Id = 21,
+                            PageId = "*",
+                            PermissionDispositionId = 1,
+                            PermissionId = 5,
+                            RoleId = 4
+                        },
+                        new
+                        {
+                            Id = 22,
+                            Namespace = "*",
+                            PermissionDispositionId = 1,
+                            PermissionId = 5,
+                            RoleId = 4
+                        },
+                        new
+                        {
+                            Id = 23,
+                            PageId = "*",
+                            PermissionDispositionId = 1,
+                            PermissionId = 3,
+                            RoleId = 3
+                        },
+                        new
+                        {
+                            Id = 24,
+                            Namespace = "*",
+                            PermissionDispositionId = 1,
+                            PermissionId = 3,
+                            RoleId = 3
+                        },
+                        new
+                        {
+                            Id = 25,
+                            PageId = "*",
+                            PermissionDispositionId = 1,
+                            PermissionId = 5,
+                            RoleId = 3
+                        },
+                        new
+                        {
+                            Id = 26,
+                            Namespace = "*",
+                            PermissionDispositionId = 1,
+                            PermissionId = 5,
+                            RoleId = 3
+                        });
                 });
 
             modelBuilder.Entity("TightWiki.Data.EfCore.Entities.DeletedPageRevisions.DeletionMeta", b =>
