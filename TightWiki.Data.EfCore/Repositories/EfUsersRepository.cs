@@ -2032,10 +2032,13 @@ namespace TightWiki.Data.EfCore.Repositories
         /// <summary>
         /// Shared by <see cref="SetAdminPasswordIsChanged"/>/<see cref="SetAdminPasswordIsDefault"/>: deletes then
         /// re-inserts the single Users.AdminPwCheck row with <paramref name="value"/> - same "keyless entity type,
-        /// bulk delete plus a raw parameterized insert whose table/schema identifier is resolved and quoted via
-        /// <see cref="ISqlGenerationHelper"/>" idiom as <see cref="EfConfigurationRepository.SetCryptoCheck"/> (see
-        /// that member's remarks for why a keyless entity needs this instead of a tracked <c>Add</c>, and for why
-        /// the table name is resolved dynamically rather than hardcoding one provider's identifier quoting).
+        /// bulk delete plus a raw parameterized insert whose table/schema identifier <em>and</em> column identifier
+        /// are both resolved and quoted via <see cref="ISqlGenerationHelper"/>" idiom as
+        /// <see cref="EfConfigurationRepository.SetCryptoCheck"/> (see that member's remarks for why a keyless
+        /// entity needs this instead of a tracked <c>Add</c>, and for why both identifiers are resolved
+        /// dynamically rather than hardcoding one provider's identifier quoting - an unquoted column name would
+        /// silently lowercase-fold on Postgres and fail to match the quoted, PascalCase column its migrations
+        /// actually create).
         /// </summary>
         private async Task SetAdminPwCheckValueAsync(int value)
         {
@@ -2046,10 +2049,11 @@ namespace TightWiki.Data.EfCore.Repositories
             //Built via plain string concatenation, not a C# interpolated-string literal, so that EF Core's
             //"don't hand raw SQL an interpolated string" analyzer (EF1002) does not flag this - "{0}" below is a
             //literal placeholder for ExecuteSqlRawAsync's own (safe, provider-parameterized) substitution, not a
-            //C# interpolation hole. quotedTable itself comes only from trusted EF metadata (never user input), so
-            //splicing it into the SQL text is not an injection risk.
+            //C# interpolation hole. quotedTable/quotedColumn themselves come only from trusted EF metadata (never
+            //user input), so splicing them into the SQL text is not an injection risk.
             var quotedTable = GetQuotedAdminPwCheckTableName(context);
-            var insertSql = "INSERT INTO " + quotedTable + " (Value) VALUES ({0})";
+            var quotedColumn = GetQuotedAdminPwCheckValueColumnName(context);
+            var insertSql = "INSERT INTO " + quotedTable + " (" + quotedColumn + ") VALUES ({0})";
             await context.Database.ExecuteSqlRawAsync(insertSql, value);
         }
 
@@ -2061,6 +2065,20 @@ namespace TightWiki.Data.EfCore.Repositories
 
             var sqlGenerationHelper = context.GetService<ISqlGenerationHelper>();
             return sqlGenerationHelper.DelimitIdentifier(entityType.GetTableName()!, entityType.GetSchema());
+        }
+
+        private static string GetQuotedAdminPwCheckValueColumnName(TightWikiDbContext context)
+        {
+            var entityType = context.Model.FindEntityType(typeof(UsersEntities.AdminPwCheck))
+                ?? throw new InvalidOperationException(
+                    $"'{typeof(UsersEntities.AdminPwCheck)}' is not part of the {nameof(TightWikiDbContext)} model.");
+
+            var property = entityType.FindProperty(nameof(UsersEntities.AdminPwCheck.Value))
+                ?? throw new InvalidOperationException(
+                    $"'{nameof(UsersEntities.AdminPwCheck.Value)}' is not part of the {typeof(UsersEntities.AdminPwCheck)} model.");
+
+            var sqlGenerationHelper = context.GetService<ISqlGenerationHelper>();
+            return sqlGenerationHelper.DelimitIdentifier(property.GetColumnName());
         }
 
         #region Security.

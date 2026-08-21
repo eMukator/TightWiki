@@ -224,10 +224,13 @@ namespace TightWiki.Data.EfCore.Repositories
         /// @Content"). Config.CryptoCheck is a keyless entity type (<c>HasNoKey()</c>), so it cannot be tracked for
         /// <c>Add</c>/<c>Remove</c> like every other entity in this class - the delete uses EF Core's LINQ bulk
         /// <c>ExecuteDeleteAsync</c> (fully provider-portable, no raw SQL needed), and the insert falls back to a
-        /// single parameterized <c>INSERT</c> statement whose table/schema identifier is resolved and quoted via
-        /// <see cref="ISqlGenerationHelper"/> (see <see cref="GetQuotedCryptoCheckTableName"/>) so it stays correct
-        /// for whichever relational provider is active, rather than hardcoding SQL Server's <c>[bracket]</c>
-        /// quoting.
+        /// single parameterized <c>INSERT</c> statement whose table/schema identifier <em>and</em> column
+        /// identifier are both resolved and quoted via <see cref="ISqlGenerationHelper"/> (see
+        /// <see cref="GetQuotedCryptoCheckTableName"/>/<see cref="GetQuotedCryptoCheckContentColumnName"/>) so it
+        /// stays correct for whichever relational provider is active, rather than hardcoding SQL Server's
+        /// <c>[bracket]</c> quoting - or, worse, emitting the column name unquoted, which on Postgres (whose
+        /// migrations create a quoted, PascalCase <c>"Content"</c> column) resolves to the lowercase-folded
+        /// <c>content</c> and fails with "column "content" ... does not exist".
         /// </summary>
         public async Task SetCryptoCheck()
         {
@@ -240,10 +243,11 @@ namespace TightWiki.Data.EfCore.Repositories
             //Built via plain string concatenation, not a C# interpolated-string literal, so that EF Core's
             //"don't hand raw SQL an interpolated string" analyzer (EF1002) does not flag this - "{0}" below is a
             //literal placeholder for ExecuteSqlRawAsync's own (safe, provider-parameterized) substitution, not a
-            //C# interpolation hole. quotedTable itself comes only from trusted EF metadata (never user input), so
-            //splicing it into the SQL text is not an injection risk.
+            //C# interpolation hole. quotedTable/quotedColumn themselves come only from trusted EF metadata (never
+            //user input), so splicing them into the SQL text is not an injection risk.
             var quotedTable = GetQuotedCryptoCheckTableName(context);
-            var insertSql = "INSERT INTO " + quotedTable + " (Content) VALUES ({0})";
+            var quotedColumn = GetQuotedCryptoCheckContentColumnName(context);
+            var insertSql = "INSERT INTO " + quotedTable + " (" + quotedColumn + ") VALUES ({0})";
             await context.Database.ExecuteSqlRawAsync(insertSql, content);
         }
 
@@ -255,6 +259,20 @@ namespace TightWiki.Data.EfCore.Repositories
 
             var sqlGenerationHelper = context.GetService<ISqlGenerationHelper>();
             return sqlGenerationHelper.DelimitIdentifier(entityType.GetTableName()!, entityType.GetSchema());
+        }
+
+        private static string GetQuotedCryptoCheckContentColumnName(TightWikiDbContext context)
+        {
+            var entityType = context.Model.FindEntityType(typeof(ConfigEntities.CryptoCheck))
+                ?? throw new InvalidOperationException(
+                    $"'{typeof(ConfigEntities.CryptoCheck)}' is not part of the {nameof(TightWikiDbContext)} model.");
+
+            var property = entityType.FindProperty(nameof(ConfigEntities.CryptoCheck.Content))
+                ?? throw new InvalidOperationException(
+                    $"'{nameof(ConfigEntities.CryptoCheck.Content)}' is not part of the {typeof(ConfigEntities.CryptoCheck)} model.");
+
+            var sqlGenerationHelper = context.GetService<ISqlGenerationHelper>();
+            return sqlGenerationHelper.DelimitIdentifier(property.GetColumnName());
         }
 
         /// <summary>
