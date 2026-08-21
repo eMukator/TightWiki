@@ -159,6 +159,10 @@ TightWiki.Data.EfCore.SqlServer/bin/
 
 TightWiki.Data.EfCore.SqlServer/obj/
 
+TightWiki.Data.EfCore.Postgres/bin/
+
+TightWiki.Data.EfCore.Postgres/obj/
+
 _tools/SchemaUpgradeTool/bin/
 
 _tools/SchemaUpgradeTool/obj/
