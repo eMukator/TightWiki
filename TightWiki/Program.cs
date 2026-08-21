@@ -28,6 +28,8 @@ using TightWiki.Plugin.Interfaces.Repository;
 using TightWiki.Repository.Helpers;
 #elif SQLSERVER_PROVIDER
 using TightWiki.Data.EfCore.SqlServer;
+#elif POSTGRES_PROVIDER
+using TightWiki.Data.EfCore.Postgres;
 #endif
 using TightWiki.Translations;
 using static TightWiki.Plugin.TwConstants;
@@ -48,10 +50,12 @@ namespace TightWiki
             ITwDatabaseManager databaseManager = new DatabaseManager(builder.Configuration);
 #elif SQLSERVER_PROVIDER
             ITwDatabaseManager databaseManager = new SqlServerDatabaseManager(builder.Configuration);
+#elif POSTGRES_PROVIDER
+            ITwDatabaseManager databaseManager = new PostgresDatabaseManager(builder.Configuration);
 #endif
             bool wasDatabaseUpgraded = await databaseManager.InitializeSchema();
 
-#if SQLSERVER_PROVIDER
+#if SQLSERVER_PROVIDER || POSTGRES_PROVIDER
             //WikiConfigurationManager is constructed further down (still before builder.Build()) and eagerly
             //reads Config.Theme (WikiConfigurationManager.ReloadAll: .Single(o => o.Name == themeName)), which is
             //empty on a freshly migrated-but-unseeded MSSQL database and crashes the app before Kestrel ever
@@ -63,20 +67,24 @@ namespace TightWiki
             //wasDatabaseUpgraded gate as that later call.
             //BuiltinPages ("Wiki Page Does Not Exist"/"Wiki Page Revision Does Not Exist"/etc. - see
             //TwDefaultDataType.BuiltinPages's own doc comment, "Core built-in wiki pages") is included here (and
-            //in the later, post-Build ApplyAllSeedData call below) only for the SQL Server build. SQLite needs no
-            //equivalent: those pages already exist unconditionally the moment DatabaseManager.CreateDefaultsDatabase
+            //in the later, post-Build ApplyAllSeedData call below) only for the SQL Server/Postgres builds. SQLite
+            //needs no equivalent: those pages already exist unconditionally the moment DatabaseManager.CreateDefaultsDatabase
             //copies the shipped, pre-populated Data\pages.db file - this selective, TwDefaultDataType-gated reseed
             //is only ever a redundant, idempotent no-op refresh for SQLite (matched by navigation, see
-            //DatabaseManager.ApplyAllSeedData), never how those pages get there in the first place. MSSQL has no
-            //such file-copy shortcut (SqlServerDatabaseManager.SeedContentDataAsync's own doc comment), so without
-            //this flag the fallback configured pages ("Page Not Exists Page"/"Revision Does Not Exists
-            //Page") never get seeded at all, and every navigation to a nonexistent page - including the very
-            //first request to the home page on a brand new install - throws an unhandled exception
+            //DatabaseManager.ApplyAllSeedData), never how those pages get there in the first place. MSSQL/PostgreSQL
+            //have no such file-copy shortcut (SqlServerDatabaseManager/PostgresDatabaseManager.SeedContentDataAsync's
+            //own doc comment), so without this flag the fallback configured pages ("Page Not Exists Page"/"Revision
+            //Does Not Exists Page") never get seeded at all, and every navigation to a nonexistent page - including
+            //the very first request to the home page on a brand new install - throws an unhandled exception
             //(PageController.Display's .EnsureNotNull() on a null GetPageRevisionByNavigation result). Confirmed
             //live against SQL Server LocalDB.
             if (wasDatabaseUpgraded)
             {
+#if SQLSERVER_PROVIDER
                 await ((SqlServerDatabaseManager)databaseManager).SeedContentDataAsync(
+#elif POSTGRES_PROVIDER
+                await ((PostgresDatabaseManager)databaseManager).SeedContentDataAsync(
+#endif
                     [TwDefaultDataType.Themes,
                     TwDefaultDataType.Configurations,
                     TwDefaultDataType.FeatureTemplates,
@@ -109,6 +117,21 @@ namespace TightWiki
             builder.Services.AddDbContext<ApplicationDbContext>(options => options.UseSqlServer(efCoreConnectionString,
                 b => b.MigrationsAssembly("TightWiki.Data.EfCore.SqlServer")
                       .MigrationsHistoryTable(SqlServerMigrationsHistory.ApplicationDbTableName, SqlServerMigrationsHistory.ApplicationDbSchema)));
+#elif POSTGRES_PROVIDER
+            //ASP.NET Identity follows the same driver as the rest of the EF model (Database-Providers-Plan.md
+            //chapter 4.1.1 - "stejná databáze, schéma Users"): same ConnectionStrings:TightWikiEfCore connection
+            //string and same provider as PostgresDatabaseManager/TightWikiDbContext.
+            var efCoreConnectionString = builder.Configuration.GetConnectionString("TightWikiEfCore")
+                ?? throw new InvalidOperationException(
+                    "Missing connection string 'ConnectionStrings:TightWikiEfCore', which is required when built with -p:DataProvider=Postgres.");
+            //MigrationsAssembly points at TightWiki.Data.EfCore.Postgres - see the matching comment on
+            //PostgresDatabaseManager.CreateApplicationDbContext, which applies these same migrations at startup.
+            //MigrationsHistoryTable is likewise explicit and distinct from TightWikiDbContext's - see
+            //PostgresMigrationsHistory for why two DbContexts over one database must not share EF Core's
+            //default public.__EFMigrationsHistory table.
+            builder.Services.AddDbContext<ApplicationDbContext>(options => options.UseNpgsql(efCoreConnectionString,
+                b => b.MigrationsAssembly("TightWiki.Data.EfCore.Postgres")
+                      .MigrationsHistoryTable(PostgresMigrationsHistory.ApplicationDbTableName, PostgresMigrationsHistory.ApplicationDbSchema)));
 #endif
 
             var wikiConfigurationManager = new WikiConfigurationManager(builder.Configuration, databaseManager);
@@ -413,16 +436,17 @@ namespace TightWiki
                     try
                     {
                         //See the matching comment on the earlier, pre-Build SeedContentDataAsync call
-                        //(#if SQLSERVER_PROVIDER, above) for why TwDefaultDataType.BuiltinPages is added only for
-                        //the SQL Server build here and left untouched (so genuinely 0-diff) for SQLite - this is
-                        //the call that actually performs the seed (the earlier one is always a no-op for wiki
-                        //pages specifically, since no admin Users.Profile row exists yet at that point).
+                        //(#if SQLSERVER_PROVIDER || POSTGRES_PROVIDER, above) for why TwDefaultDataType.BuiltinPages
+                        //is added only for the SQL Server/Postgres builds here and left untouched (so genuinely
+                        //0-diff) for SQLite - this is the call that actually performs the seed (the earlier one is
+                        //always a no-op for wiki pages specifically, since no admin Users.Profile row exists yet at
+                        //that point).
                         await databaseManager.ApplyAllSeedData(new TwVerbatimLocalizationText(), userManager, tightEngine,
                             [TwDefaultDataType.Themes,
                             TwDefaultDataType.Configurations,
                             TwDefaultDataType.FeatureTemplates,
                             TwDefaultDataType.HelpPages,
-#if SQLSERVER_PROVIDER
+#if SQLSERVER_PROVIDER || POSTGRES_PROVIDER
                             TwDefaultDataType.BuiltinPages,
 #endif
                             ]);

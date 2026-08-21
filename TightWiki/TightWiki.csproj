@@ -7,9 +7,8 @@
 	</PropertyGroup>
 
 	<!--
-		DataProvider selects which database driver this build targets. "Sqlite" (the default) and "SqlServer"
-		are implemented; a future Postgres driver will plug in here via its own ProjectReference/PackageReference
-		conditions and a corresponding DefineConstants branch, e.g.:
+		DataProvider selects which database driver this build targets. "Sqlite" (the default), "SqlServer" and
+		"Postgres" are implemented, e.g.:
 		  -p:DataProvider=Postgres
 	-->
 	<PropertyGroup>
@@ -22,6 +21,10 @@
 
 	<PropertyGroup Condition="'$(DataProvider)'=='SqlServer'">
 		<DefineConstants>$(DefineConstants);SQLSERVER_PROVIDER</DefineConstants>
+	</PropertyGroup>
+
+	<PropertyGroup Condition="'$(DataProvider)'=='Postgres'">
+		<DefineConstants>$(DefineConstants);POSTGRES_PROVIDER</DefineConstants>
 	</PropertyGroup>
 
 	<PropertyGroup Condition="'$(Configuration)'=='Release'">
@@ -62,6 +65,7 @@
 		<ProjectReference Include="..\TightWiki.Library\TightWiki.Library.csproj" />
 		<ProjectReference Include="..\TightWiki.Repository\TightWiki.Repository.csproj" Condition="'$(DataProvider)'=='Sqlite'" />
 		<ProjectReference Include="..\TightWiki.Data.EfCore.SqlServer\TightWiki.Data.EfCore.SqlServer.csproj" Condition="'$(DataProvider)'=='SqlServer'" />
+		<ProjectReference Include="..\TightWiki.Data.EfCore.Postgres\TightWiki.Data.EfCore.Postgres.csproj" Condition="'$(DataProvider)'=='Postgres'" />
 		<ProjectReference Include="..\TightWiki.SharedResources\TightWiki.SharedResources.csproj" />
 	</ItemGroup>
 
