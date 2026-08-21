@@ -170,3 +170,5 @@ _tools/SchemaUpgradeTool/obj/
 _tools/EfScaffoldTool/bin/
 
 _tools/EfScaffoldTool/obj/
+
+TightWiki/Seed/
