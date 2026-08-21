@@ -133,6 +133,7 @@ namespace TightWiki.Data.EfCore
         /// not exist on SQL Server/Postgres, and a migration/runtime call would fail there.
         /// </summary>
         /// <remarks>
+        /// <para>
         /// Per chapter 4.4 ("MSSQL má CI collation obvykle jako DB default") and the open question in chapter 8,
         /// the chosen approach for non-SQLite providers is to <b>not</b> set an explicit collation at all and
         /// rely on the server/database default collation being case-insensitive (LocalDB and a stock SQL Server
@@ -142,6 +143,19 @@ namespace TightWiki.Data.EfCore
         /// is deliberately phrased as "keep it only for Sqlite", not "strip it for SqlServer" - so a future
         /// Postgres driver (phase 3) inherits "no NOCASE" automatically and can layer its own citext/lower()
         /// convention on top later without this method needing another provider-specific branch.
+        /// </para>
+        /// <para>
+        /// Phase 3 (Postgres) is that layered-on-top branch: Npgsql doesn't know the <c>NOCASE</c> collation
+        /// name either, so it is stripped the same as for SqlServer, but on top of that every stripped
+        /// <c>string</c> column is switched to the <c>citext</c> column type - Postgres's case-insensitive text
+        /// type, the closest match to SQLite's <c>NOCASE</c> semantics (the extension itself is enabled by
+        /// <c>PostgresDatabaseManager.InitializeSchema</c>, not here - this project has no Npgsql package
+        /// reference and must not gain one; <c>SetColumnType</c> is plain
+        /// <c>Microsoft.EntityFrameworkCore.Relational</c> API). Two of the 49 <c>NOCASE</c> columns are
+        /// <see cref="Guid"/>, not <c>string</c> (<c>Profile.UserId</c>, <c>AccountRole.UserId</c> - SQLite
+        /// stores <see cref="Guid"/> as TEXT, hence <c>NOCASE</c> made sense there) - <c>citext</c> is a text
+        /// type, so those are deliberately excluded via the <c>ClrType == typeof(string)</c> check below.
+        /// </para>
         /// </remarks>
         private void StripNonSqliteNoCaseCollation(ModelBuilder modelBuilder)
         {
@@ -150,6 +164,8 @@ namespace TightWiki.Data.EfCore
                 return; //SQLite (present or future TightWiki.Data.EfCore.Sqlite driver) keeps NOCASE as configured.
             }
 
+            var isNpgsql = Database.ProviderName?.Contains("Npgsql", StringComparison.OrdinalIgnoreCase) == true;
+
             foreach (var entityType in modelBuilder.Model.GetEntityTypes())
             {
                 foreach (var property in entityType.GetProperties())
@@ -157,6 +173,11 @@ namespace TightWiki.Data.EfCore
                     if (property.GetCollation() == "NOCASE")
                     {
                         property.SetCollation(null);
+
+                        if (isNpgsql && property.ClrType == typeof(string))
+                        {
+                            property.SetColumnType("citext");
+                        }
                     }
                 }
             }
