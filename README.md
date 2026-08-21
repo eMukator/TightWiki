@@ -7,6 +7,12 @@ The first thing that comes to mind is a Wiki but for some reason I can never fin
 
 :yum: TightWiki is an ASP.NET Core MVC Razor WIKI written in C# that sits on top of a SQLite database (zero configuration required).
 
+> **This fork** extends the original project with built-in support for running on Microsoft SQL Server and
+> PostgreSQL, via Entity Framework Core — see [Database Providers](#database-providers) below for how to choose
+> one. Because the EF Core model is provider-agnostic, support for further relational databases (e.g.
+> MySQL/MariaDB, Oracle) could be added the same way down the line. SQLite remains the default, zero-configuration
+> option exactly as in the original project — nothing changes if you don't opt into a different provider.
+
 :crossed_fingers: Play with the latest dev build at http://TightWiki.com/. If you want to edit, you can signup using google auth or native TightWiki login.
 
 :eyes: Or check out the full wiki [documentation](https://tightwiki.com/Wiki%20Help%20::%20Wiki%20Help) to learn about the engine functionality.
