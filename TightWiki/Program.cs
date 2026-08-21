@@ -46,14 +46,17 @@ namespace TightWiki
 
             var builder = WebApplication.CreateBuilder(args);
 
-#if SQLSERVER_PROVIDER
-            //appsettings.Development.json is shared by every DataProvider, so it can't hold a SqlServer-only
-            //ConnectionStrings:TightWikiEfCore override (Postgres debug builds need the Postgres value from the
-            //base appsettings.json instead). This file carries the SqlServer LocalDB override and only loads
-            //for SqlServer debug/dev sessions, applied before databaseManager below reads the connection string.
+#if SQLSERVER_PROVIDER || POSTGRES_PROVIDER
+            //appsettings.Development.json is shared by every DataProvider, so it can't hold a provider-specific
+            //ConnectionStrings:TightWikiEfCore override. Each EF Core provider gets its own dev-only file instead,
+            //loaded before databaseManager below reads the connection string.
             if (builder.Environment.IsDevelopment())
             {
+#if SQLSERVER_PROVIDER
                 builder.Configuration.AddJsonFile("appsettings.Development.SqlServer.json", optional: true, reloadOnChange: true);
+#elif POSTGRES_PROVIDER
+                builder.Configuration.AddJsonFile("appsettings.Development.Postgres.json", optional: true, reloadOnChange: true);
+#endif
             }
 #endif
 
