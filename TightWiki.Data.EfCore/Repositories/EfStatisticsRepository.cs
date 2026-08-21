@@ -108,10 +108,41 @@ namespace TightWiki.Data.EfCore.Repositories
         /// on an existing row, same as the script's <c>ON CONFLICT</c> clause not mentioning it. See this class's
         /// doc comment for the non-atomic upsert caveat.
         /// </summary>
+        /// <remarks>
+        /// <b>Deliberate divergence from the SQLite reference: <paramref name="pageId"/> &lt;= 0 is a no-op here.</b>
+        /// <see cref="Plugin.Models.TwPage.Id"/>'s own doc comment states "a value of 0 indicates the page has not
+        /// been saved" - i.e. every real, persisted page has an <see cref="TightWiki.Data.EfCore.Entities.Pages.Page.Id"/>
+        /// assigned by the identity/auto-increment primary key (starts at 1, see <c>PageConfiguration.Configure</c>'s
+        /// <c>HasKey(e =&gt; e.Id)</c>), so <c>pageId &lt;= 0</c> can only ever be the synthetic, un-persisted "adhoc"
+        /// <see cref="Plugin.Models.TwPage"/> that <c>WikiEngine.Transform(localizer, session, string markup)</c>/
+        /// <c>TransformLite</c> construct on the fly (e.g. <c>_Layout.cshtml</c>'s footer blurb, profile biography,
+        /// page comment previews) - never a real page. The SQLite reference script's <c>INSERT ... ON CONFLICT</c>
+        /// has no such guard and silently inserts/updates an orphaned <c>PageStatistics</c> row for
+        /// <c>PageId = 0</c> that no <c>Page</c> row will ever match; SQLite does not enforce
+        /// <c>PageStatistics.PageId</c> as a real FOREIGN KEY reference to <c>Page.Id</c> (unlike this EF Core
+        /// model - see <see cref="StatisticsEntities.PageStatistic.Page"/>/<c>PageStatisticConfiguration</c>'s real,
+        /// required FK), so that orphan row is silently accepted there and never surfaces as an observable bug -
+        /// it just wastes a row that has no value (nothing ever reads statistics for a page that doesn't exist).
+        /// Under a provider that enforces the FK (SQL Server/Postgres), the same insert attempt instead violates
+        /// the constraint and fails the entire request that triggered it (originally surfaced via every page
+        /// rendering <c>_Layout.cshtml</c>'s footer, since <see cref="TightWiki.Plugin.TwConfiguration.FooterBlurb"/>
+        /// is transformed through the pageless overload on every request). Left unfixed in the SQLite reference
+        /// per this project's convention of not modifying <c>Scripts\*.sql</c> - see repo-root <c>CLAUDE.md</c> -
+        /// since it has no observable behavioral impact there.
+        /// </remarks>
         public async Task MergePageCompilationStatistics(int pageId,
             double wikifyTimeMs, int matchCount, int errorCount, int outgoingLinkCount,
             int tagCount, int processedBodySize, int bodySize)
         {
+            if (pageId <= 0)
+            {
+                //See the <remarks> above: pageId <= 0 only ever means the synthetic, un-persisted "adhoc" TwPage
+                //used for pageless markup transforms (footer blurb, biography, comment previews, etc.) - there is
+                //no real Page row to attribute statistics to, and attempting the insert would violate the real
+                //FK from PageStatistics.PageId to Page.Id that this EF Core model enforces (unlike SQLite).
+                return;
+            }
+
             using var context = _createContext();
 
             var lastCompileDateTime = DateTime.UtcNow;
