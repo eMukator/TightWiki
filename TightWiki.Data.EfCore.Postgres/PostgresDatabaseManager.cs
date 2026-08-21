@@ -10,6 +10,12 @@ using TightWiki.Library;
 using TightWiki.Plugin;
 using TightWiki.Plugin.Interfaces;
 using TightWiki.Plugin.Interfaces.Repository;
+using TightWiki.Plugin.Models;
+using TightWiki.Plugin.Models.Defaults;
+using ConfigEntities = TightWiki.Data.EfCore.Entities.Config;
+using EmojiEntities = TightWiki.Data.EfCore.Entities.Emoji;
+using PagesEntities = TightWiki.Data.EfCore.Entities.Pages;
+using UsersEntities = TightWiki.Data.EfCore.Entities.Users;
 
 namespace TightWiki.Data.EfCore.Postgres
 {
@@ -22,14 +28,20 @@ namespace TightWiki.Data.EfCore.Postgres
     /// referenced from <c>Program.cs</c> yet.
     /// </summary>
     /// <remarks>
-    /// This is the phase 3.2 skeleton, extended in phase 3.5: the constructor, <see cref="Logger"/>, every
+    /// This is the phase 3.2 skeleton, extended in phase 3.5 and 3.6: the constructor, <see cref="Logger"/>, every
     /// repository property (wired directly to the shared, provider-agnostic <c>Ef*Repository</c> classes in
     /// <c>TightWiki.Data.EfCore</c> - already real, same as <see cref="TightWiki.Data.EfCore.SqlServer.SqlServerDatabaseManager"/>
     /// wires them), <see cref="CreateDbContext"/>/<see cref="CreateApplicationDbContext"/>, <see cref="InitializeSchema"/>,
-    /// and every <see cref="ISpannedRepository"/> member (phase 3.5 - vendor-native PostgreSQL maintenance
-    /// operations, Database-Providers-Plan.md chapter 4.4/4.2) are real. <see cref="ApplyAllSeedData"/> (phase 3.6)
-    /// is still a <see cref="NotImplementedException"/> stub - mirrors how <c>SqlServerDatabaseManager</c> looked
-    /// right after its own phase 2a.1/2a.2/2a.4, before its own follow-up phases filled the rest in.
+    /// every <see cref="ISpannedRepository"/> member (phase 3.5 - vendor-native PostgreSQL maintenance
+    /// operations, Database-Providers-Plan.md chapter 4.4/4.2), and <see cref="ApplyAllSeedData"/>/
+    /// <see cref="SeedContentDataAsync"/> (phase 3.6 - copied from <c>SqlServerDatabaseManager</c>'s own phase
+    /// 2a.5/2a.10 implementation, which is pure provider-agnostic LINQ against <see cref="TightWikiDbContext"/>/
+    /// <see cref="EfDefaultsRepository"/> with no T-SQL - see each method's own doc comment) are real. Wiring this
+    /// into <c>Program.cs</c> - including the pre-<c>Build()</c> <c>SeedContentDataAsync</c> call and the choice of
+    /// which <see cref="TwDefaultDataType"/> flags to pass (the MSSQL build passes
+    /// <see cref="TwDefaultDataType.BuiltinPages"/>, see <see cref="SeedContentDataAsync"/>'s doc comment for why)
+    /// - is still phase 3.7, not this one; this method itself already handles <see cref="TwDefaultDataType.BuiltinPages"/>
+    /// correctly once a caller passes it.
     /// </remarks>
     public sealed class PostgresDatabaseManager : ITwDatabaseManager, ISpannedRepository
     {
@@ -181,12 +193,589 @@ namespace TightWiki.Data.EfCore.Postgres
         }
 
         /// <summary>
-        /// Not implemented yet - lands in phase 3.6 (Database-Providers-Plan.md), mirroring
-        /// <c>SqlServerDatabaseManager.ApplyAllSeedData</c> (phase 2a.5/2a.10).
+        /// EF Core implementation of <see cref="ITwDatabaseManager.ApplyAllSeedData"/> (Database-Providers-Plan.md
+        /// chapter 4.6/phase 3.6). Reads the provider-neutral content seed (<see cref="DefaultsRepository"/> over
+        /// "Seed\tightwiki.seed.zip") and writes it directly into <see cref="TightWikiDbContext"/> via
+        /// <c>Add</c>/<c>AddRange</c> + <c>SaveChangesAsync</c> - deliberately <b>not</b> through
+        /// <see cref="ConfigurationRepository"/>/<see cref="PageRepository"/>, matching the shared, provider-agnostic
+        /// pattern <c>SqlServerDatabaseManager.ApplyAllSeedData</c> (phase 2a.5/2a.10) already established: this
+        /// entire seed-import block (this method, <see cref="SeedContentDataAsync"/>, <see cref="EnsureAdminUser"/>,
+        /// <see cref="SeedConfigurations"/>, <see cref="SeedThemes"/>, <see cref="SeedWikiPages"/>,
+        /// <see cref="SeedFeatureTemplates"/>, <see cref="SeedMenuItems"/>, <see cref="SeedEmojiAndCategories"/>) is
+        /// copied verbatim from <c>SqlServerDatabaseManager</c> - it is pure LINQ against the shared
+        /// <see cref="TightWikiDbContext"/>/<see cref="EfDefaultsRepository"/>, with no T-SQL and nothing SQL
+        /// Server-specific to adapt for PostgreSQL.
         /// </summary>
-        public Task ApplyAllSeedData(ITwSharedLocalizationText localizer, UserManager<IdentityUser> userManager,
+        /// <remarks>
+        /// <para>
+        /// Kept split the same way as the MSSQL driver (phase 2a.10): everything except <see cref="EnsureAdminUser"/>
+        /// lives in <see cref="SeedContentDataAsync"/>, which this method is now a thin wrapper over - ensure the
+        /// admin user exists, then delegate. It still exists (rather than every caller using the split halves
+        /// directly) because it is the <see cref="ITwDatabaseManager"/> interface member, whose signature could not
+        /// change (see <see cref="SeedContentDataAsync"/>'s doc comment for why the split exists and how the two
+        /// calls in <c>Program.cs</c> divide the work on the MSSQL build - the same division will apply here once
+        /// phase 3.7 wires this driver into <c>Program.cs</c>).
+        /// </para>
+        /// <para>
+        /// Mirrors the SQLite reference (<c>TightWiki.Repository.Helpers.DatabaseManager.ApplyAllSeedData</c>) in
+        /// structure and in which <paramref name="defaultDataTypes"/> flag gates which section - Configurations,
+        /// Themes, {Help,Include,Builtin}Pages, FeatureTemplates. Config.MenuItem and the whole Emoji schema have
+        /// no corresponding <see cref="TwDefaultDataType"/> flag and are seeded unconditionally instead: on
+        /// SQLite these tables are never populated through this method at all - they arrive "for free" via a
+        /// full copy of the shipped, pre-populated Data\config.db/emoji.db files (see
+        /// <see cref="DefaultsRepository"/>'s and <c>DefaultsRepository.GetDefaultEmojis</c>'s doc comments) - but
+        /// PostgreSQL has no such file-copy shortcut, so this is the only path that ever populates them.
+        /// </para>
+        /// <para>
+        /// Idempotency mirrors the SQLite reference's "MERGE ... ON CONFLICT DO UPDATE" scripts
+        /// (Scripts\Defaults\Merge\*.sql): each row is looked up by its natural key first, existing rows are
+        /// updated in place (except <c>ConfigurationEntry.Value</c>, deliberately preserved on conflict so a
+        /// re-run never clobbers an administrator's tuned setting - see <c>MergeConfigurationEntry.sql</c> and
+        /// <see cref="SeedConfigurations"/>), and missing rows are inserted. In practice this only matters if
+        /// this method (or <see cref="SeedContentDataAsync"/>) is ever invoked more than once against the same
+        /// database - both callers (<c>Program.cs</c>, once phase 3.7 wires this driver in) will gate on
+        /// <see cref="InitializeSchema"/> having just performed the very first migration, same as the MSSQL build.
+        /// </para>
+        /// <para>
+        /// Bootstrapping the admin account needed for <c>Page.CreatedByUserId</c>/<c>ModifiedByUserId</c>
+        /// (<see cref="EnsureAdminUser"/>) talks to <paramref name="userManager"/> (real ASP.NET Core Identity) and
+        /// writes a matching <c>Users.Profile</c> row directly - not through
+        /// <c>ITwUsersRepository.CreateProfile</c>/<c>UpsertUserClaims</c>, since that repository's profile-creation
+        /// path is not what this bootstrap step uses on the MSSQL driver either. Claims (first/last name) are
+        /// therefore not seeded here; that is purely cosmetic and out of scope for seeding wiki page ownership.
+        /// </para>
+        /// </remarks>
+        public async Task ApplyAllSeedData(ITwSharedLocalizationText localizer, UserManager<IdentityUser> userManager,
             ITwEngine tightEngine, TwDefaultDataType[] defaultDataTypes)
-            => throw new NotImplementedException();
+        {
+            using (var context = CreateDbContext())
+            {
+                await EnsureAdminUser(context, userManager);
+            }
+
+            await SeedContentDataAsync(defaultDataTypes);
+        }
+
+        /// <summary>
+        /// The DI-free half of <see cref="ApplyAllSeedData"/> (Database-Providers-Plan.md phase 3.6, mirroring
+        /// <c>SqlServerDatabaseManager</c>'s own phase 2a.10 split): seeds everything <see cref="ApplyAllSeedData"/>
+        /// does except <see cref="EnsureAdminUser"/> - i.e. <see cref="SeedConfigurations"/>, <see cref="SeedThemes"/>,
+        /// <see cref="SeedWikiPages"/>, <see cref="SeedFeatureTemplates"/>, <see cref="SeedMenuItems"/>,
+        /// <see cref="SeedEmojiAndCategories"/>. Takes only what it needs to open a <see cref="TightWikiDbContext"/>
+        /// (nothing - it reuses <see cref="CreateDbContext"/> like every other method here) and
+        /// <paramref name="defaultDataTypes"/>; deliberately does <b>not</b> take a <see cref="UserManager{TUser}"/>,
+        /// so it is safe to call before ASP.NET Core's DI container exists.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Exists for the same reason the MSSQL driver's does: <c>Program.cs</c> constructs
+        /// <c>WikiConfigurationManager</c> before <c>WebApplicationBuilder.Build()</c>, and that constructor eagerly
+        /// reads Config.Theme (<c>WikiConfigurationManager.ReloadAll</c>: <c>.Single(o => o.Name == themeName)</c>)
+        /// - which is empty on a freshly migrated-but-unseeded PostgreSQL database (unlike SQLite, where Config.Theme
+        /// ships pre-seeded inside the shipped <c>config.db</c> file), crashing the app with "Sequence contains no
+        /// matching element" before Kestrel ever starts listening. On the MSSQL build, <c>Program.cs</c> calls the
+        /// equivalent method directly (via an explicit cast - it is intentionally not part of
+        /// <see cref="ITwDatabaseManager"/>) right after <see cref="InitializeSchema"/>, gated on the same "was the
+        /// schema just upgraded" condition as the later <see cref="ApplyAllSeedData"/> call; wiring the same call for
+        /// this driver is phase 3.7, not this one - see this method's own doc comment on <see cref="ApplyAllSeedData"/>
+        /// for what remains out of scope here.
+        /// </para>
+        /// <para>
+        /// Because no <see cref="UserManager{TUser}"/> is available yet at that point in <c>Program.cs</c>, this
+        /// method cannot create the admin user itself. Instead of skipping <see cref="SeedWikiPages"/> outright,
+        /// it looks up whatever admin <c>Users.Profile</c> row already exists (there is none on the very first,
+        /// pre-<c>Build()</c> call) and only seeds wiki pages if one is found. The later, post-<c>Build()</c> call
+        /// to <see cref="ApplyAllSeedData"/> runs <see cref="EnsureAdminUser"/> first and then calls this method
+        /// again - by then the admin profile exists, so that second call is what actually seeds wiki pages; every
+        /// other section it repeats (Configurations, Themes, FeatureTemplates, MenuItems, Emoji) is a no-op the
+        /// second time, per this method's idempotency (see <see cref="ApplyAllSeedData"/>'s remarks).
+        /// </para>
+        /// <para>
+        /// <see cref="TwDefaultDataType.BuiltinPages"/> - the fallback "Wiki Page Does Not Exist"/"Wiki Page
+        /// Revision Does Not Exist" pages a brand new install's very first request (including the home page) needs
+        /// to avoid an unhandled exception - is handled by this method exactly like every other namespace flag
+        /// below (<c>if (defaultDataTypes.Contains(TwDefaultDataType.BuiltinPages)) namespaces.Add("Builtin");</c>).
+        /// It is copied here unmodified from <c>SqlServerDatabaseManager.SeedContentDataAsync</c>; whether
+        /// <c>Program.cs</c> actually passes <see cref="TwDefaultDataType.BuiltinPages"/> for this driver is phase
+        /// 3.7's job, not this one - see this class's own top-of-file remarks.
+        /// </para>
+        /// </remarks>
+        public async Task SeedContentDataAsync(TwDefaultDataType[] defaultDataTypes)
+        {
+            using var context = CreateDbContext();
+
+            if (defaultDataTypes.Contains(TwDefaultDataType.Configurations))
+            {
+                await SeedConfigurations(context);
+            }
+
+            if (defaultDataTypes.Contains(TwDefaultDataType.Themes))
+            {
+                await SeedThemes(context);
+            }
+
+            var adminProfile = await context.Profiles.FirstOrDefaultAsync(p => p.AccountName == "admin");
+            if (adminProfile != null)
+            {
+                var namespaces = new List<string>();
+                if (defaultDataTypes.Contains(TwDefaultDataType.HelpPages)) namespaces.Add("Wiki Help");
+                if (defaultDataTypes.Contains(TwDefaultDataType.IncludePages)) namespaces.Add("Include");
+                if (defaultDataTypes.Contains(TwDefaultDataType.BuiltinPages)) namespaces.Add("Builtin");
+
+                if (namespaces.Count > 0)
+                {
+                    await SeedWikiPages(context, namespaces, adminProfile.UserId);
+                }
+            }
+
+            if (defaultDataTypes.Contains(TwDefaultDataType.FeatureTemplates))
+            {
+                await SeedFeatureTemplates(context);
+            }
+
+            //No TwDefaultDataType flag exists for these three - see the remarks on ApplyAllSeedData above on why
+            //they are always seeded rather than gated.
+            await SeedMenuItems(context);
+            await SeedEmojiAndCategories(context);
+        }
+
+        /// <summary>
+        /// Finds or creates the built-in admin <see cref="IdentityUser"/> (looked up/created by
+        /// <see cref="Constants.DEFAULTUSERNAME"/>, not the literal string <c>"admin"</c> - see remarks) together
+        /// with its matching <c>Users.Profile</c> row (still keyed on the literal <c>"admin"</c>
+        /// <c>Users.Profile.AccountName</c>/<c>Navigation</c>, which is an independent, TightWiki-owned value
+        /// unrelated to the Identity username), so that <see cref="SeedWikiPages"/> has a valid
+        /// <c>Page.CreatedByUserId</c>/<c>ModifiedByUserId</c>. Returns null (logging the failure) if no admin user
+        /// could be found or created, in which case the caller skips wiki page seeding entirely - same fallback
+        /// behavior as the SQLite reference.
+        /// </summary>
+        /// <remarks>
+        /// The SQLite reference's inline bootstrap (<c>DatabaseManager.ApplyAllSeedData</c>) finds/creates the
+        /// Identity user by the literal username <c>"admin"</c> instead. This intentionally diverges from that -
+        /// copied unmodified from <c>SqlServerDatabaseManager.EnsureAdminUser</c>, which fixed exactly this
+        /// divergence after it was found by smoke-testing a fresh SQL Server install (phase 2b.14): this method
+        /// runs (via <see cref="ApplyAllSeedData"/>) immediately before
+        /// <c>EfUsersRepository.ValidateEncryptionAndCreateAdminUserAsync</c> - called moments later from the same
+        /// <c>Program.cs</c> DI scope - which independently finds/creates the Identity user by
+        /// <see cref="Constants.DEFAULTUSERNAME"/> and then re-points the existing <c>Profile</c> row (keyed on
+        /// <see cref="Constants.DEFAULTACCOUNT"/>) at whatever id it resolved via <c>SetProfileUserId</c>. Looking
+        /// this method's user up by the literal <c>"admin"</c> username instead would create a second, distinct
+        /// <see cref="IdentityUser"/> from the one <c>ValidateEncryptionAndCreateAdminUserAsync</c> later
+        /// finds/creates under <see cref="Constants.DEFAULTUSERNAME"/>, and re-pointing <c>Profile.UserId</c> from
+        /// this method's id to that one would violate the FK from every already-seeded
+        /// <c>Page.CreatedByUserId</c>/<c>ModifiedByUserId</c>/<c>PageRevision.ModifiedByUserId</c> (and every other
+        /// column referencing <c>Profile.UserId</c> across the <c>Pages</c>/<c>DeletedPages</c>/
+        /// <c>DeletedPageRevisions</c>/<c>Users</c> schemas) - an UPDATE of a primary key still referenced by
+        /// existing FK rows. Looking this method's user up by <see cref="Constants.DEFAULTUSERNAME"/> instead means
+        /// <c>ValidateEncryptionAndCreateAdminUserAsync</c>'s later <c>FindByNameAsync</c> finds the very same
+        /// Identity user this method already created, so its subsequent <c>SetProfileUserId</c> call is a no-op
+        /// UPDATE (new value == existing value) rather than a genuine repoint, and no FK violation occurs. This has
+        /// no SQLite-side equivalent to keep in sync with: the SQLite reference matches the admin
+        /// <c>Users.Profile</c> row by <c>Navigation</c>/<c>AccountName</c> (<c>GetAdminUserId.sql</c>), not by
+        /// Identity username, so it never re-points an existing profile's primary key the way this MSSQL/PostgreSQL
+        /// EF path does.
+        /// </remarks>
+        private async Task<Guid?> EnsureAdminUser(TightWikiDbContext context, UserManager<IdentityUser> userManager)
+        {
+            try
+            {
+                Guid adminUserId;
+
+                var existingUser = await userManager.FindByNameAsync(Constants.DEFAULTUSERNAME);
+                if (existingUser != null)
+                {
+                    adminUserId = Guid.Parse(existingUser.Id);
+                }
+                else
+                {
+                    var user = new IdentityUser { UserName = Constants.DEFAULTUSERNAME };
+                    var result = await userManager.CreateAsync(user, PasswordGenerator.Generate(32));
+                    if (!result.Succeeded)
+                    {
+                        Logger.LogError("Could not create the default admin user for seeding default wiki pages: {Errors}",
+                            string.Join("; ", result.Errors.Select(e => e.Description)));
+                        return null;
+                    }
+
+                    adminUserId = Guid.Parse(await userManager.GetUserIdAsync(user));
+                }
+
+                if (await context.Profiles.FindAsync(adminUserId) == null)
+                {
+                    var now = DateTime.UtcNow;
+                    context.Profiles.Add(new UsersEntities.Profile
+                    {
+                        UserId = adminUserId,
+                        AccountName = "admin",
+                        Navigation = TwNavigation.Clean("admin"),
+                        CreatedDate = now,
+                        ModifiedDate = now,
+                    });
+                    await context.SaveChangesAsync();
+                }
+
+                return adminUserId;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "An error occurred while ensuring the existence of an admin user for seeding "
+                    + "default wiki pages. Default wiki page seeding will be skipped.");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Seeds Config.ConfigurationGroup and Config.ConfigurationEntry from <see cref="DefaultsRepository"/>.
+        /// Mirrors MergeConfigurationGroup.sql/MergeConfigurationEntry.sql: existing rows (matched by their
+        /// natural key) are updated in place rather than duplicated, except that an existing entry's
+        /// <c>Value</c> is deliberately left untouched (see <see cref="ApplyAllSeedData"/>'s remarks).
+        /// </summary>
+        private async Task SeedConfigurations(TightWikiDbContext context)
+        {
+            var defaultGroups = await DefaultsRepository.GetDefaultConfigurationGroups();
+            var existingGroups = await context.ConfigurationGroups.ToDictionaryAsync(g => g.Name, StringComparer.OrdinalIgnoreCase);
+
+            foreach (var defaultGroup in defaultGroups)
+            {
+                if (existingGroups.TryGetValue(defaultGroup.ConfigurationGroupName, out var existingGroup))
+                {
+                    existingGroup.Description = defaultGroup.ConfigurationGroupDescription;
+                }
+                else
+                {
+                    var newGroup = new ConfigEntities.ConfigurationGroup
+                    {
+                        Name = defaultGroup.ConfigurationGroupName,
+                        Description = defaultGroup.ConfigurationGroupDescription,
+                    };
+                    context.ConfigurationGroups.Add(newGroup);
+                    existingGroups[defaultGroup.ConfigurationGroupName] = newGroup;
+                }
+            }
+
+            await context.SaveChangesAsync(); //Need every group's Id before entries below can reference it.
+
+            var defaultEntries = await DefaultsRepository.GetDefaultConfigurations();
+            var existingEntries = await context.ConfigurationEntries
+                .ToDictionaryAsync(e => (e.ConfigurationGroupId, e.Name.ToUpperInvariant()));
+
+            foreach (var defaultEntry in defaultEntries)
+            {
+                if (!existingGroups.TryGetValue(defaultEntry.ConfigurationGroupName, out var group))
+                {
+                    Logger.LogWarning("Skipped seeding configuration entry '{Entry}' - its configuration group "
+                        + "'{Group}' was not found.", defaultEntry.ConfigurationEntryName, defaultEntry.ConfigurationGroupName);
+                    continue;
+                }
+
+                var entryKey = (group.Id, defaultEntry.ConfigurationEntryName.ToUpperInvariant());
+                if (existingEntries.TryGetValue(entryKey, out var existingEntry))
+                {
+                    //Value is intentionally not overwritten here - see MergeConfigurationEntry.sql / the remarks
+                    //on ApplyAllSeedData.
+                    existingEntry.Name = defaultEntry.ConfigurationEntryName;
+                    existingEntry.DataTypeId = defaultEntry.DataTypeId;
+                    existingEntry.Description = defaultEntry.ConfigurationEntryDescription;
+                    existingEntry.IsEncrypted = defaultEntry.IsEncrypted;
+                    existingEntry.IsRequired = defaultEntry.IsRequired;
+                }
+                else
+                {
+                    var newEntry = new ConfigEntities.ConfigurationEntry
+                    {
+                        ConfigurationGroupId = group.Id,
+                        Name = defaultEntry.ConfigurationEntryName,
+                        Value = defaultEntry.Value,
+                        DataTypeId = defaultEntry.DataTypeId,
+                        Description = defaultEntry.ConfigurationEntryDescription,
+                        IsEncrypted = defaultEntry.IsEncrypted,
+                        IsRequired = defaultEntry.IsRequired,
+                    };
+                    context.ConfigurationEntries.Add(newEntry);
+                    existingEntries[entryKey] = newEntry;
+                }
+            }
+
+            await context.SaveChangesAsync();
+        }
+
+        /// <summary>
+        /// Seeds Config.Theme from <see cref="DefaultsRepository"/>. Mirrors MergeTheme.sql - existing rows
+        /// (matched by <see cref="Entities.Config.Theme.Name"/>, the real primary key) are updated in place.
+        /// </summary>
+        private async Task SeedThemes(TightWikiDbContext context)
+        {
+            var defaultThemes = await DefaultsRepository.GetDefaultThemes();
+            var existingThemes = await context.Themes.ToDictionaryAsync(t => t.Name, StringComparer.OrdinalIgnoreCase);
+
+            foreach (var defaultTheme in defaultThemes)
+            {
+                if (existingThemes.TryGetValue(defaultTheme.Name, out var existingTheme))
+                {
+                    existingTheme.DelimitedFiles = defaultTheme.DelimitedFiles;
+                    existingTheme.ClassNavBar = defaultTheme.ClassNavBar;
+                    existingTheme.ClassNavLink = defaultTheme.ClassNavLink;
+                    existingTheme.ClassDropdown = defaultTheme.ClassDropdown;
+                    existingTheme.ClassBranding = defaultTheme.ClassBranding;
+                    existingTheme.EditorTheme = defaultTheme.EditorTheme;
+                }
+                else
+                {
+                    context.Themes.Add(new ConfigEntities.Theme
+                    {
+                        Name = defaultTheme.Name,
+                        DelimitedFiles = defaultTheme.DelimitedFiles,
+                        ClassNavBar = defaultTheme.ClassNavBar,
+                        ClassNavLink = defaultTheme.ClassNavLink,
+                        ClassDropdown = defaultTheme.ClassDropdown,
+                        ClassBranding = defaultTheme.ClassBranding,
+                        EditorTheme = defaultTheme.EditorTheme,
+                    });
+                }
+            }
+
+            await context.SaveChangesAsync();
+        }
+
+        /// <summary>
+        /// Seeds Pages.Page + Pages.PageRevision (revision 1 only - no markup processing/tokenization/tagging,
+        /// see <see cref="ApplyAllSeedData"/>'s remarks on why <see cref="PageRepository"/> is not used) for the
+        /// given default-wiki-page namespaces. Existing pages (matched by
+        /// <see cref="Entities.Pages.Page.Navigation"/>) have their current revision's content overwritten in
+        /// place rather than being duplicated or revision-bumped, mirroring the SQLite reference passing the
+        /// existing page's Id into <c>UpsertPage</c> when one is found.
+        /// </summary>
+        private async Task SeedWikiPages(TightWikiDbContext context, List<string> namespaces, Guid adminUserId)
+        {
+            var defaultPages = new List<TwDefaultWikiPage>();
+            foreach (var namespaceName in namespaces)
+            {
+                defaultPages.AddRange(await DefaultsRepository.GetDefaultWikiPages(namespaceName));
+            }
+
+            var existingPages = await context.Pages_Pages.ToDictionaryAsync(p => p.Navigation, StringComparer.OrdinalIgnoreCase);
+            var now = DateTime.UtcNow;
+
+            foreach (var defaultPage in defaultPages)
+            {
+                if (existingPages.TryGetValue(defaultPage.Navigation, out var existingPage))
+                {
+                    existingPage.Name = defaultPage.Name;
+                    existingPage.Namespace = defaultPage.Namespace;
+                    existingPage.Description = defaultPage.Description;
+                    existingPage.ModifiedByUserId = adminUserId;
+                    existingPage.ModifiedDate = now;
+
+                    var existingRevision = await context.Pages_PageRevisions.FindAsync(existingPage.Id, existingPage.Revision);
+                    if (existingRevision != null)
+                    {
+                        existingRevision.Name = defaultPage.Name;
+                        existingRevision.Namespace = defaultPage.Namespace;
+                        existingRevision.Description = defaultPage.Description;
+                        existingRevision.Body = defaultPage.Body;
+                        existingRevision.ModifiedByUserId = adminUserId;
+                        existingRevision.ModifiedDate = now;
+                        existingRevision.DataHash = defaultPage.DataHash;
+                    }
+                }
+                else
+                {
+                    var newPage = new PagesEntities.Page
+                    {
+                        Name = defaultPage.Name,
+                        Namespace = defaultPage.Namespace,
+                        Navigation = defaultPage.Navigation,
+                        Description = defaultPage.Description,
+                        Revision = 1,
+                        CreatedByUserId = adminUserId,
+                        CreatedDate = now,
+                        ModifiedByUserId = adminUserId,
+                        ModifiedDate = now,
+                    };
+                    context.Pages_Pages.Add(newPage);
+                    await context.SaveChangesAsync(); //Need the generated Id - PageRevision.PageId is not a navigation.
+
+                    context.Pages_PageRevisions.Add(new PagesEntities.PageRevision
+                    {
+                        PageId = newPage.Id,
+                        Name = defaultPage.Name,
+                        Namespace = defaultPage.Namespace,
+                        Description = defaultPage.Description,
+                        Body = defaultPage.Body,
+                        Revision = 1,
+                        ModifiedByUserId = adminUserId,
+                        ModifiedDate = now,
+                        DataHash = defaultPage.DataHash,
+                    });
+
+                    existingPages[defaultPage.Navigation] = newPage;
+                }
+            }
+
+            await context.SaveChangesAsync();
+        }
+
+        /// <summary>
+        /// Seeds Pages.FeatureTemplate from <see cref="DefaultsRepository"/>. Mirrors MergeFeatureTemplate.sql:
+        /// existing rows (matched by the composite (Name, Type) primary key) are updated in place, and
+        /// <see cref="TwDefaultFeatureTemplate.PageName"/> is resolved against the just-seeded Pages.Page rows -
+        /// left null (same as the SQL subquery returning no row) when no matching page exists.
+        /// </summary>
+        private async Task SeedFeatureTemplates(TightWikiDbContext context)
+        {
+            var defaultTemplates = await DefaultsRepository.GetDefaultFeatureTemplates();
+            var existingTemplates = await context.FeatureTemplates.ToDictionaryAsync(t => (t.Name.ToUpperInvariant(), t.Type.ToUpperInvariant()));
+            var pageIdsByName = await context.Pages_Pages.ToDictionaryAsync(p => p.Name, p => p.Id, StringComparer.OrdinalIgnoreCase);
+
+            foreach (var defaultTemplate in defaultTemplates)
+            {
+                int? pageId = null;
+                if (!string.IsNullOrEmpty(defaultTemplate.PageName) && pageIdsByName.TryGetValue(defaultTemplate.PageName, out var foundPageId))
+                {
+                    pageId = foundPageId;
+                }
+
+                var templateKey = (defaultTemplate.Name.ToUpperInvariant(), defaultTemplate.Type.ToUpperInvariant());
+                if (existingTemplates.TryGetValue(templateKey, out var existingTemplate))
+                {
+                    existingTemplate.PageId = pageId;
+                    existingTemplate.Description = defaultTemplate.Description;
+                    existingTemplate.TemplateText = defaultTemplate.TemplateText;
+                }
+                else
+                {
+                    context.FeatureTemplates.Add(new PagesEntities.FeatureTemplate
+                    {
+                        Name = defaultTemplate.Name,
+                        Type = defaultTemplate.Type,
+                        PageId = pageId,
+                        Description = defaultTemplate.Description,
+                        TemplateText = defaultTemplate.TemplateText,
+                    });
+                }
+            }
+
+            await context.SaveChangesAsync();
+        }
+
+        /// <summary>
+        /// Seeds Config.MenuItem from <see cref="DefaultsRepository"/>. No SQLite merge script/natural unique
+        /// constraint exists to mirror (SQLite never seeds this table - see
+        /// <see cref="ITwDefaultsRepository.GetDefaultMenuItems"/>'s doc comment), so existing rows are matched
+        /// by the (Name, Link) pair.
+        /// </summary>
+        private async Task SeedMenuItems(TightWikiDbContext context)
+        {
+            var defaultMenuItems = await DefaultsRepository.GetDefaultMenuItems();
+            var existingMenuItems = await context.MenuItems
+                .ToDictionaryAsync(m => (m.Name.ToUpperInvariant(), m.Link.ToUpperInvariant()));
+
+            foreach (var defaultMenuItem in defaultMenuItems)
+            {
+                var menuItemKey = (defaultMenuItem.Name.ToUpperInvariant(), defaultMenuItem.Link.ToUpperInvariant());
+                if (existingMenuItems.TryGetValue(menuItemKey, out var existingMenuItem))
+                {
+                    existingMenuItem.Ordinal = defaultMenuItem.Ordinal;
+                }
+                else
+                {
+                    context.MenuItems.Add(new ConfigEntities.MenuItem
+                    {
+                        Name = defaultMenuItem.Name,
+                        Link = defaultMenuItem.Link,
+                        Ordinal = defaultMenuItem.Ordinal,
+                    });
+                }
+            }
+
+            await context.SaveChangesAsync();
+        }
+
+        /// <summary>
+        /// Seeds Emoji.Emoji + Emoji.EmojiCategory from <see cref="DefaultsRepository"/>. Existing rows are
+        /// matched by <see cref="EmojiEntities.Emoji.Name"/> (Emoji) / (EmojiId, Category) (EmojiCategory).
+        /// </summary>
+        /// <remarks>
+        /// Two things this method has to do that no other seed helper here does:
+        /// <list type="bullet">
+        /// <item><description>Re-map the seed package's <see cref="TwDefaultEmoji.Id"/>/<see cref="TwDefaultEmojiCategory.EmojiId"/>
+        /// to whatever identity value PostgreSQL actually assigns each newly-inserted Emoji row (there is no
+        /// stable natural key shared between the two other than Name, and preserving the seed package's own Ids
+        /// would require overriding the identity sequence) - built once as newly-inserted rows are saved, since
+        /// Emoji.EmojiCategory declares no FK/navigation back to Emoji to let EF do this automatically (see
+        /// <see cref="EmojiEntities.EmojiCategory"/>'s doc comment).</description></item>
+        /// <item><description>Re-compress each image's bytes with GZip before writing them to
+        /// <see cref="EmojiEntities.Emoji.ImageData"/> - the seed package stores emoji images uncompressed for
+        /// diffability (see <see cref="EfDefaultsRepository"/>), but the runtime (<c>FileController.cs</c>,
+        /// <see cref="Utility.Decompress"/>) always expects GZip-compressed bytes there, mirroring
+        /// <see cref="Utility.Compress"/> (see Database-Providers-Plan.md chapter 4.6 / commit 7eb2c329) - same as
+        /// the MSSQL driver, copied unmodified.</description></item>
+        /// </list>
+        /// </remarks>
+        private async Task SeedEmojiAndCategories(TightWikiDbContext context)
+        {
+            var defaultEmojis = await DefaultsRepository.GetDefaultEmojis();
+            var existingEmojis = await context.Emojis.ToDictionaryAsync(e => e.Name, StringComparer.OrdinalIgnoreCase);
+
+            var seedIdToDatabaseId = new Dictionary<int, int>();
+            var newlyInsertedEmojis = new List<(int SeedId, EmojiEntities.Emoji Entity)>();
+
+            foreach (var defaultEmoji in defaultEmojis)
+            {
+                if (existingEmojis.TryGetValue(defaultEmoji.Name, out var existingEmoji))
+                {
+                    seedIdToDatabaseId[defaultEmoji.Id] = existingEmoji.Id;
+                    continue;
+                }
+
+                var imageBytes = await DefaultsRepository.ReadEmojiImageBytes(defaultEmoji.ImageEntry);
+
+                var newEmoji = new EmojiEntities.Emoji
+                {
+                    Name = defaultEmoji.Name,
+                    MimeType = defaultEmoji.MimeType,
+                    ImageData = Utility.Compress(imageBytes),
+                };
+                context.Emojis.Add(newEmoji);
+                newlyInsertedEmojis.Add((defaultEmoji.Id, newEmoji));
+            }
+
+            if (newlyInsertedEmojis.Count > 0)
+            {
+                await context.SaveChangesAsync(); //Need every new Emoji's generated Id for EmojiCategory below.
+                foreach (var (seedId, entity) in newlyInsertedEmojis)
+                {
+                    seedIdToDatabaseId[seedId] = entity.Id;
+                }
+            }
+
+            var defaultCategories = await DefaultsRepository.GetDefaultEmojiCategories();
+            var existingCategoryKeys = (await context.EmojiCategories.Select(c => new { c.EmojiId, c.Category }).ToListAsync())
+                .Select(c => (c.EmojiId, c.Category.ToUpperInvariant()))
+                .ToHashSet();
+
+            foreach (var defaultCategory in defaultCategories)
+            {
+                if (!seedIdToDatabaseId.TryGetValue(defaultCategory.EmojiId, out var emojiId))
+                {
+                    Logger.LogWarning("Skipped seeding emoji category '{Category}' - its emoji (seed id {SeedId}) "
+                        + "was not found.", defaultCategory.Category, defaultCategory.EmojiId);
+                    continue;
+                }
+
+                var categoryKey = (emojiId, defaultCategory.Category.ToUpperInvariant());
+                if (existingCategoryKeys.Add(categoryKey))
+                {
+                    context.EmojiCategories.Add(new EmojiEntities.EmojiCategory
+                    {
+                        EmojiId = emojiId,
+                        Category = defaultCategory.Category,
+                    });
+                }
+            }
+
+            await context.SaveChangesAsync();
+        }
 
         #region Database admin - ISpannedRepository / ITwDatabaseManager.
 
